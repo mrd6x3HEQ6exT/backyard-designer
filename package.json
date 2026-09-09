@@ -1,0 +1,15 @@
+{
+  "name": "backyard-designer",
+  "version": "2026.9.8-2",
+  "private": true,
+  "description": "Single-file, zero-dependency backyard planning tool. Playwright is a dev dependency for the test suite only; the app itself ships as one HTML file.",
+  "scripts": {
+    "build": "cat src/p1_head.html src/p2_data.js src/p3_engine.js src/p4_ui.js > index.html",
+    "test:syntax": "node test/syntax.js",
+    "test:smoke": "node test/smoke.js",
+    "test": "node test/syntax.js && node test/smoke.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

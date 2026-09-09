@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      # Browserless: index.html is in sync with src/, and every <script> block parses.
+      # Runs first because it needs no browser and catches a stale build instantly.
+      - name: Syntax and build-integrity check
+        run: node test/syntax.js
+
+      - name: Install dependencies
+        run: npm ci
+
+      # smoke.js falls back to Playwright's bundled Chromium when CHROME_PATH is unset.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end smoke test
+        run: node test/smoke.js
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: test/*.png
+          if-no-files-found: ignore
