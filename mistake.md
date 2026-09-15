@@ -2,8 +2,22 @@ MISTAKE LOG — self-check file, not for human reading. Newest first.
 Standing rule: before any build/code change, grep this file (tags below) as a
 visible tool call. Grep again before shipping. No visible tool call = not done.
 
-TAGS (newest first): trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
+TAGS (newest first): focus-scrolls-overflow-hidden > mouse-direction-is-never-exact > trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
 
+---
+TAG: focus-scrolls-overflow-hidden
+IF: calling focus() on an element positioned inside an overflow:hidden container (#canvasWrap), or any element that may extend past its container's edge
+WHAT: the direct-distance box opened near the right edge, focus() scrolled #canvasWrap by 59-98 px to bring it into view, the canvas shifted under the stationary cursor, canvas fired mouseleave, ui.mouseW went null, the typed side went east instead of south
+WHY: overflow:hidden is still a scroll container; focus() scrolls ancestors by default. Nothing in the smoke test exercised the canvas edge. Found only because a demo screenshot script pointed near the edge.
+RESULT: silent wrong geometry with no error; would have shipped
+FIX: focus({preventScroll:true}); clamp the box inside the canvas; keep ui.dirW (last on-canvas cursor) so a stray mouseleave cannot blank the direction. Regression test opens the box at the edge and asserts scrollLeft===0. Any new overlay positioned over the canvas gets the same treatment.
+---
+TAG: mouse-direction-is-never-exact
+IF: deriving an angle from a hand-positioned cursor and then laying out a length along it
+WHAT: first pass used the raw atan2 of cursor minus last vertex. A cursor 0.07 deg off horizontal put a typed 30 ft side 0.47" off; a human 2 deg off would be a foot off. Sides were not orthogonal, the closing gap read 5.5" instead of 6", and edge edits inherited the skew.
+WHY: assumed "point roughly east" was good enough. It is not: float angle from integer mouse pixels is never 0.000.
+RESULT: test failed on exact coordinates (good), but the design was wrong, not just the test
+FIX: polar tracking — lock to the nearest 45 deg multiple when within 5 deg, else round to 1 deg; Shift forces the lock. Test both: a 10-deg-off cursor + Shift lands at 90, a deliberate 30-deg cursor stays at 30.
 ---
 TAG: trailing-comment-swallows-line
 IF: doing scripted string replacement on a PREFIX of a line (anchor shorter than the line)

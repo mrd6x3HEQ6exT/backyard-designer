@@ -31,6 +31,8 @@ input[type=range]{padding:0}
 #right{width:320px;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 #canvasWrap{flex:1;position:relative;background:#fafaf7;overflow:hidden;cursor:crosshair}
 #c{position:absolute;inset:0;display:block}
+#lenBox{position:absolute;width:96px;padding:4px 6px;font-size:13px;background:#fff;color:#111;border:2px solid var(--acc);border-radius:5px;box-shadow:0 2px 8px rgba(0,0,0,.35);z-index:5}
+#lenBox.bad{border-color:var(--bad)}
 #hud{position:absolute;left:8px;bottom:8px;background:rgba(20,24,28,.85);color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;pointer-events:none;white-space:pre}
 #hint{position:absolute;left:50%;top:8px;transform:translateX(-50%);background:rgba(20,24,28,.85);color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;pointer-events:none;max-width:70%;text-align:center}
 .sec{border-bottom:1px solid var(--line)}
@@ -98,6 +100,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
     <button id="btnDims" class="active" title="D">Dims</button>
     <button id="btnArcs" class="active" title="Show sprinkler spray arcs">Arcs</button>
     <button id="btnFit" title="Zoom to fit (F)">Fit</button>
+    <button id="btnUnits">ft-in</button>
   </div>
   <div class="grp">
     <label>Supply GPM</label><input type="number" id="supplyGpm" step="0.1" min="0">
@@ -120,6 +123,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
     <canvas id="c"></canvas>
     <div id="hint"></div>
     <div id="hud"></div>
+    <input id="lenBox" hidden autocomplete="off" spellcheck="false" placeholder="30.17">
   </div>
   <aside id="right">
     <div id="tabs">
@@ -147,7 +151,9 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
       <h4>Keys</h4>
       <div class="note"><kbd>V</kbd> select <kbd>H</kbd> pan <kbd>M</kbd> measure <kbd>Enter</kbd> finish <kbd>Esc</kbd> cancel <kbd>Del</kbd> delete <kbd>R</kbd> rotate 15° (<kbd>Shift</kbd>+<kbd>R</kbd> 90°) <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo <kbd>G</kbd> grid <kbd>S</kbd> snap <kbd>D</kbd> dims <kbd>F</kbd> fit <kbd>arrows</kbd> nudge 6"</div>
       <h4>Lengths</h4>
-      <div class="note">Type lengths as <code>12'6"</code>, <code>12' 6</code>, <code>12.5</code> (feet), or <code>150in</code>.</div>
+      <div class="note">Type lengths as <code>12'6"</code>, <code>12' 6</code>, <code>12.5</code> or <code>30.17ft</code> (decimal feet), or <code>150in</code>.</div>
+      <h4>Measured layout (tape)</h4>
+      <div class="note">While drawing an area or run, point the mouse the way the side runs and type its length — <code>30.17</code> — then Enter. The next corner lands exactly that far, not snapped to the grid. The direction follows the mouse in 1° steps and locks to 0/45/90° whenever you are within 5° of one; hold Shift (or Shift+Enter) to force the lock. Keep going round; when a typed side lands within a foot of the start it closes the shape and reports the closing gap. To fix a side afterwards, select the shape and edit its length in the Edges table in Properties — the far corner slides along the edge. The <b>ft-in / ft.dec</b> button switches every length in the app between <code>30'-2"</code> and <code>30.17 ft</code>.</div>
       <h4>Survey / grade</h4>
       <div class="note">Set the level up once, then read the grade rod at each spot. Survey / grade → Survey point, click to place. Points are labelled A, B, C … Z, AA, AB … and never renumber when one is deleted, so they match your notebook. Enter each reading in Properties (metres — 1.235, 123.5cm, 1235mm all work). Tick Benchmark on one point; every other point then shows its height relative to it in cm and inches. Higher reading = lower ground. The Survey tab lists all points, finds the high and low, and gives slope between any two as % and in/ft.</div>
       <h4>Data notes</h4>

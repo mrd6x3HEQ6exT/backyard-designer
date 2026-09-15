@@ -8,6 +8,7 @@ function newState(){
     objects:[],
     layers:Object.fromEntries(LAYERS.map(l=>[l.id,{visible:true,locked:false}])),
     supply:{gpm:6, psi:50},
+    units:'ftin',                // 'ftin' -> 30'-2"   'decft' -> 30.17 ft (engineer's tape)
     prices:Object.assign({}, DEFAULT_PRICES),
     nextId:1,
     nextLabel:0,                 // survey label counter; never reused, so labels stay stable across deletes
@@ -29,7 +30,9 @@ const canvas = $('#c'); const ctx = canvas.getContext('2d');
 // ================= Helpers =================
 const uid = ()=> 'o'+(state.nextId++);
 const snap = v => ui.snap ? Math.round(v/GRID)*GRID : Math.round(v*2)/2;
+const r2 = v => Math.round(v*100)/100;   // 1/100 inch: enough to hold 30.17 ft exactly, kills float noise
 const fmtLen = inches => {
+  if(state.units==='decft'){ const v=r2(inches/12); return (v<0?'-':'')+Math.abs(v).toFixed(2)+' ft'; }
   const neg = inches<0; inches=Math.abs(inches);
   let ft=Math.floor(inches/12), rem=inches-ft*12;
   rem = Math.round(rem*4)/4;
@@ -53,6 +56,26 @@ function parseLen(s){
 }
 const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 const pathLen = pts => pts.reduce((s,p,i)=> i? s+dist(pts[i-1],p):0,0);
+// Next drawing vertex for a cursor position. With ortho (Shift) the direction from the last
+// vertex is locked to the nearest 45 degrees and the distance snaps instead of the coordinates.
+function candidatePoint(pw, ortho){
+  if(!ortho||!ui.drawPts.length) return [snap(pw[0]),snap(pw[1])];
+  const last=ui.drawPts[ui.drawPts.length-1]; const dx=pw[0]-last[0], dy=pw[1]-last[1];
+  const a=Math.round(Math.atan2(dy,dx)/(Math.PI/4))*(Math.PI/4); const d=snap(Math.hypot(dx,dy));
+  return [r2(last[0]+Math.cos(a)*d), r2(last[1]+Math.sin(a)*d)];
+}
+// Direction (radians) a typed length is laid out along: from the last vertex toward the cursor;
+// falls back to the previous segment's direction, then +x. Ortho locks it to 45-degree steps.
+function drawDirection(ortho){
+  const pts=ui.drawPts, last=pts[pts.length-1]; let dx=0, dy=0;
+  const m=ui.mouseW||ui.dirW; if(m){ dx=m[0]-last[0]; dy=m[1]-last[1]; }
+  if(Math.hypot(dx,dy)<1){ if(pts.length>=2){ const q=pts[pts.length-2]; dx=last[0]-q[0]; dy=last[1]-q[1]; } else { dx=1; dy=0; } }
+  // Polar tracking: within 5 degrees of a 45-degree multiple the direction locks to it (a hand-pointed
+  // 'east' is never exactly 0 degrees, and 2 degrees off is a foot of drift over 30 ft). Otherwise 1-degree steps.
+  let a=Math.atan2(dy,dx); const q=Math.PI/4, near=Math.round(a/q)*q;
+  if(ortho||Math.abs(a-near)<5*Math.PI/180) a=near; else a=Math.round(a*180/Math.PI)*Math.PI/180;
+  return a;
+}
 function polyArea(pts){let a=0;for(let i=0;i<pts.length;i++){const p=pts[i],q=pts[(i+1)%pts.length];a+=p[0]*q[1]-q[0]*p[1];}return Math.abs(a)/2;}
 function polyCentroid(pts){let x=0,y=0;pts.forEach(p=>{x+=p[0];y+=p[1];});return [x/pts.length,y/pts.length];}
 function pointInPoly(pt,pts){let ins=false;for(let i=0,j=pts.length-1;i<pts.length;j=i++){const xi=pts[i][0],yi=pts[i][1],xj=pts[j][0],yj=pts[j][1];if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi))ins=!ins;}return ins;}
@@ -99,6 +122,7 @@ function migrate(st){
   st.layers = Object.assign(Object.fromEntries(LAYERS.map(l=>[l.id,{visible:true,locked:false}])), st.layers||{});
   st.prices = Object.assign({}, DEFAULT_PRICES, st.prices||{});
   st.supply = st.supply||{gpm:6,psi:50};
+  st.units = st.units==='decft'?'decft':'ftin';
   st.objects = st.objects||[]; st.nextId = st.nextId||(st.objects.length+1);
   st.slope = st.slope||{a:null,b:null};
   if(st.nextLabel==null){ const idx=st.objects.filter(o=>o.kind==='spoint'&&o.props&&o.props.label).map(o=>labelIndex(o.props.label)); st.nextLabel = idx.length? Math.max(...idx)+1 : 0; }
@@ -276,7 +300,7 @@ function drawHandles(o){
 }
 function drawDrawing(){
   if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1]), true); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
-  const pts = ui.drawPts.concat(ui.mouseW? [[snap(ui.mouseW[0]),snap(ui.mouseW[1])]] : []);
+  const pts = ui.drawPts.concat(ui.mouseW? [candidatePoint(ui.mouseW, ui.ortho)] : []);
   const sp=pts.map(w2s); const st=KIND_STYLE[ui.lib.kind]||{stroke:'#333'};
   ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
   if(ui.lib.tool==='poly' && pts.length>2){ ctx.closePath(); ctx.fillStyle=st.fill||'rgba(0,0,0,.05)'; ctx.fill(); }

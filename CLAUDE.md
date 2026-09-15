@@ -1,6 +1,6 @@
 # Backyard Designer — project handoff for Claude Code
 
-Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.14.1`.
+Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.14.2`.
 
 ## Working rules (non-negotiable)
 
@@ -10,6 +10,7 @@ Single-file, zero-dependency HTML canvas app for planning a backyard: layout, ir
 4. Bump `BUILD_ID` in `src/p2_data.js` on every build (format `YYYY.MM.DD.n`).
 5. Deliverables as `.zip`, not loose files. Summaries, not explanations. Flag overbuilding, missing concerns, or better alternatives proactively.
 6. All distances are **inches** internally, displayed as feet-inches. Grid is 6". Don't introduce metric.
+   **Display units (2026.09.14.2):** `state.units` switches `fmtLen` between `30'-2"` and `30.17 ft` app-wide (top-bar button). Storage is unchanged — inches. `parseLen` reads both forms, so every length input round-trips in either mode.
    **One deliberate exception (2026.09.14.1):** survey rod readings are stored in **mm** (`props.reading` on `spoint` items) because the grade rod is metric and the owner works in metric for elevation. That is the vertical axis only. Plan geometry (x, y, w, h, pts) stays inches. Elevation is always *displayed* in both — metric first, then feet-inches via `fmtLen(mmToIn(mm))`.
 
 ## Repo layout
@@ -20,9 +21,10 @@ src/p1_head.html    HTML skeleton + all CSS + Help tab text
 src/p2_data.js      constants, BUILD_ID, LAYERS, HEADS (sprinkler DB), PLANTS, LIB (object library), KIND_STYLE, PAVER_SIZES, ZONE_COLORS, DEFAULT_PRICES
 src/p3_engine.js    state, view, helpers (fmtLen/parseLen/geometry), history+autosave, object factories, hit-testing, all canvas rendering, conduitFittings()
 src/p4_ui.js        left panel builder, mouse/keyboard handlers, right-panel tabs (Properties/Layers/Zones/BOM), computeBom(), import/export/PNG, init
-test/smoke.js       Playwright end-to-end suite, 53 assertions (scene build, hit-test precedence,
+test/smoke.js       Playwright end-to-end suite, 71 assertions (scene build, hit-test precedence,
                     undo hygiene, vertex drag, conduit fittings, parseLen, zone clamp, PSI warning,
-                    BOM escaping, survey labels/deltas/slope/CSV/migrate, JSON round-trip, PNG export).
+                    BOM escaping, survey labels/deltas/slope/CSV/migrate, typed lengths / ortho /
+                    closing gap / edge edit / units toggle, JSON round-trip, PNG export).
                     Exits non-zero on failure.
 test/syntax.js      Browserless build-integrity + parse check. Exits non-zero on failure.
 mistake.md          self-check log (see rule 3)
@@ -46,7 +48,8 @@ CI: `.github/workflows/ci.yml` runs the syntax check, then the smoke test, on ev
 ```
 { version, build, objects:[...], layers:{id:{visible,locked}}, supply:{gpm,psi}, prices:{key:number}, nextId,
   nextLabel,            // survey label counter (see Survey below)
-  slope:{a,b} }         // survey point ids picked in the Survey tab slope tool
+  slope:{a,b},          // survey point ids picked in the Survey tab slope tool
+  units }               // 'ftin' | 'decft' — display only; every length is still inches internally
 ```
 `migrate(st)` fills defaults on import/autosave restore. Autosave to `localStorage['byd.state']` (try/catch, 400 ms debounce). Undo/redo = JSON snapshots of `{objects, nextLabel}` (`ui.hist`, max 100) — the label counter travels with history so undoing a placement rolls it back.
 
@@ -61,7 +64,15 @@ Only one `yard` poly is allowed (drawing a new one replaces it; it is `unshift`e
 
 **UI state** `ui`: `tool` ∈ select|pan|measure|draw|place, `lib` = active library entry, `drawPts`, `selId`, `drag` ({type: move|vertex|resize|radius|arcstart|arcend}), toggles `showGrid/snap/showDims/showArcs`.
 
-**Snap**: `snap(v)` rounds to 6" when on, else 0.5". Everything user-placed goes through it.
+**Snap**: `snap(v)` rounds to 6" when on, else 0.5". Clicked points go through it. **Typed lengths do not** — a side entered as 30.17 lands at exactly 362.04" (`r2()` rounds to 1/100"), and stays there until the vertex is dragged.
+
+**Measured layout (direct distance entry)** — 2026.09.14.2. While drawing with ≥1 vertex, a digit or `.` opens `#lenBox` at the cursor (`openLenBox`); Enter calls `commitLen`: length via `parseLen`, direction via `drawDirection(ortho)`:
+- direction = last vertex → cursor (`ui.mouseW`, falling back to `ui.dirW`, the last on-canvas position, then the previous segment, then +x);
+- **polar tracking**: if within 5° of a 45° multiple it locks to it, otherwise it rounds to 1° — a hand-pointed "east" is never 0.000°, and 2° off is a foot of drift over 30 ft;
+- Shift (tracked as `ui.ortho` on mousemove/keydown, or `shiftKey` on Enter) forces the 45° lock. `candidatePoint(pw, ortho)` applies the same lock to clicked points and to the rubber-band preview.
+- For polys with ≥3 vertices, a typed point landing within 12" of the first vertex is the closing side of a traverse: `finishDraw(gapMsg)` closes without adding it and `notice()` shows the closing gap. The notice is issued *after* `setTool('select')` because `setTool` clears the hint.
+- `openLenBox` clamps the box inside the canvas and calls `focus({preventScroll:true})` — see mistake.md `focus-scrolls-overflow-hidden`.
+- Properties shows an **Edges** table for polys/paths (`[data-edge]`): typing a length slides the far vertex along the existing edge direction (`pts[j] = a + (b−a)·v/L`).
 
 **Dimensions**: `dimEdges()` labels each polygon edge at its midpoint offset along the normal; polygon centroid shows name, area (sq ft), and (yard only) perimeter. Path end shows name + total length. Items show name; selected items show w×h. All update live during drags because `draw()` re-derives everything from `state`.
 
@@ -114,7 +125,9 @@ Full-sun perennials for USDA zone 8a, ~4,600 ft elevation, monsoon summer. Each 
 Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable unit price (shared across rows with the same key). Categories: Conduit, Irrigation, Hardscape, Lighting, Plants, Dig plan. CSV export via `bomCsv()`. Pipe/drip/wire lengths get +10% waste.
 
 ## Interaction reference (as shipped)
-- Draw area/run: click grid points; poly closes by clicking the first point or Enter; path finishes with Enter or a double-click **on the same snapped point** (time-only double-click was a bug — see mistake.md).
+- Draw area/run: click grid points; poly closes by clicking the first point or Enter; path finishes with Enter or a double-click **on the same snapped point** (time-only double-click was a bug — see mistake.md). Or point the mouse and type a length (`30.17`, `30'2"`, `362in`) + Enter for the next vertex; Shift+Enter forces 0/45/90°; a typed side landing within a foot of the start closes the shape and reports the closing gap.
+- Edges table in Properties: type a side length, the far vertex slides along the edge.
+- `ft-in` / `ft.dec` top-bar button toggles every displayed length between `30'-2"` and `30.17 ft`.
 - Place item: click repeatedly; Esc stops. Ghost preview follows cursor.
 - Select: drag = move; drag vertex = reshape; click midpoint "+" = insert vertex; Alt-click vertex = delete; drag corner square = resize (circles stay round); heads have radius handle (white) and arc handles (orange).
 - Keys: V select, H pan, M measure, Enter finish, Esc cancel/deselect, Del delete, R rotate 15° (Shift+R 90°), Ctrl+D duplicate, Ctrl+Z/Y, G grid, S snap, D dims, F fit, arrows nudge 6" (Shift 12").
@@ -122,6 +135,10 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - Top bar: New, Import (JSON), Export (JSON), PNG (prompts px/ft; renders offscreen at that scale with a title block, restores view), BOM CSV, Undo/Redo, Grid/Snap/Dims/Arcs toggles, Fit, Supply GPM/PSI.
 - Survey: Survey / grade → Survey point, click to place (repeat). Properties: reading (m), Benchmark tick, note. Survey tab for the table, high/low, slope and CSV.
 - Right tabs: Properties (context form), Layers (eye/lock), Zones, BOM, Survey, Help.
+
+## Added in 2026.09.14.2
+- Measured layout: type a side length while drawing (direct distance entry) with polar tracking, Shift ortho, exact non-snapped placement, and traverse closing-gap report. Edges table in Properties. ft-in / decimal-ft display toggle.
+- Bug found while building it: `focus()` on the length box scrolled `#canvasWrap` when the box overflowed the canvas edge, shifting the canvas under the cursor. Fixed with `preventScroll` + clamping; regression-tested.
 
 ## Added in 2026.09.14.1
 - Survey / grade: labelled elevation points (A…Z, AA…), metric rod readings, benchmark-relative Δ shown in cm **and** inches, slope between any two points in % and in/ft, Survey tab + CSV. See the Survey section above and the rule 6 exception.
@@ -147,6 +164,7 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - Autosave has no `beforeunload` flush; a change made inside the 400 ms debounce window is lost if the tab closes.
 - `computeBom()` hardcodes a rule per object kind; if the library keeps growing, move BOM rules onto the `LIB` entries.
 - Supply GPM/PSI default to 6/50 with no prompt to measure. Every zone number downstream depends on those two being real.
+- Typed lengths: no typed angle syntax (`30.17 @ 37`); direction is by mouse only. No closing-error *distribution* (compass-rule adjustment) — the gap is reported, not spread across the sides.
 - Survey: no turning points (single instrument setup assumed); no contour/heat-map rendering; `migrate` can under-derive `nextLabel` for a pre-2026.09.14.1 file whose highest-labelled point was deleted (labels could then repeat once — only affects files that never had the field).
 - Yard measurements are pending; lawn on record is 45×22 ft minus a 9×15 ft patio plus an 8×15 ft strip (975 sq ft), Monaco Bermuda seeding planned 2027.
 

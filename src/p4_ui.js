@@ -6,7 +6,7 @@ function setTool(id, lib){ ui.tool=id; ui.lib=lib||null; ui.drawPts=[]; ui.measu
   document.querySelectorAll('#toolBtns button').forEach(b=>b.classList.toggle('active', b.dataset.id===id && !lib));
   document.querySelectorAll('.libitem').forEach(b=>b.classList.toggle('active', !!lib && b.dataset.id===lib.id));
   $('#canvasWrap').style.cursor = id==='pan'?'grab': id==='select'?'default':'crosshair';
-  $('#hint').textContent = lib? (lib.tool==='poly'? `Drawing ${lib.name}: click grid points; click the first point or press Enter to close. Esc cancels.` : lib.tool==='path'? `Drawing ${lib.name}: click points; Enter or double-click to finish. Esc cancels.` : `Placing ${lib.name}: click to place (repeat). Esc to stop.`) : id==='measure'?'Measure: click two points.': id==='select'?'':'Pan: drag.';
+  $('#hint').textContent = lib? (lib.tool==='poly'? `Drawing ${lib.name}: click grid points, or point the mouse and type a length (30.17) for the next corner. Shift locks 0/45/90°. Click the first point or press Enter to close. Esc cancels.` : lib.tool==='path'? `Drawing ${lib.name}: click points, or point the mouse and type a length for the next one. Shift locks 0/45/90°. Enter or double-click to finish. Esc cancels.` : `Placing ${lib.name}: click to place (repeat). Esc to stop.`) : id==='measure'?'Measure: click two points.': id==='select'?'':'Pan: drag.';
   $('#hint').hidden = !$('#hint').textContent; draw(); }
 function buildLeft(){
   $('#toolBtns').innerHTML = TOOLS.map(t=>`<button data-id="${t.id}">${t.name}</button>`).join('');
@@ -32,6 +32,7 @@ canvas.addEventListener('mousedown', e=>{
   const gp=[snap(pw[0]),snap(pw[1])];
   if(ui.tool==='measure'){ if(!ui.measure||ui.measure.b){ ui.measure={a:gp}; } else { ui.measure.b=gp; } draw(); return; }
   if(ui.tool==='draw'){
+    const gp=candidatePoint(pw, e.shiftKey);   // shadows the snapped point above; Shift = ortho
     if(ui.lib.tool==='poly' && ui.drawPts.length>2 && dist(ui.drawPts[0],gp)<8/view.scale){ finishDraw(); return; }
     const now=Date.now(); if(ui.lib.tool==='path' && now-lastClickT<400 && ui.drawPts.length>=2 && dist(ui.drawPts[ui.drawPts.length-1],gp)===0){ lastClickT=0; finishDraw(); return; } lastClickT=now;
     if(!ui.drawPts.length || dist(ui.drawPts[ui.drawPts.length-1],gp)>0) ui.drawPts.push(gp); draw(); return;
@@ -49,7 +50,7 @@ canvas.addEventListener('mousedown', e=>{
   refresh();
 });
 window.addEventListener('mousemove', e=>{
-  const sp=evtPos(e); const pw=s2w(sp); ui.mouse=sp; ui.mouseW=pw;
+  const sp=evtPos(e); const pw=s2w(sp); ui.mouse=sp; ui.mouseW=pw; ui.dirW=pw; ui.ortho=e.shiftKey;
   if(ui.panning){ view.ox=ui.panning.ox+sp[0]-ui.panning.sx; view.oy=ui.panning.oy+sp[1]-ui.panning.sy; draw(); return; }
   if(ui.drag){ const d=ui.drag, o=d.o;
     // Snapshot on the first real movement, not on mousedown: a plain click to select
@@ -68,17 +69,45 @@ window.addEventListener('mousemove', e=>{
 });
 window.addEventListener('mouseup', e=>{ if(ui.panning){ui.panning=null;} if(ui.drag){ ui.drag=null; refresh(); } });
 canvas.addEventListener('mouseleave', ()=>{ ui.mouseW=null; draw(); });
-function finishDraw(){
-  const lib=ui.lib; const pts=ui.drawPts; ui.drawPts=[];
+function finishDraw(gapMsg){
+  const lib=ui.lib; const pts=ui.drawPts; ui.drawPts=[]; closeLenBox();
   if(lib.tool==='poly' && pts.length>=3){ pushHist(); if(lib.kind==='yard') state.objects=state.objects.filter(o=>o.kind!=='yard'); const o=makePoly(lib,pts); state.objects.unshift(o); ui.selId=o.id; }
   else if(lib.tool==='path' && pts.length>=2){ pushHist(); const o=makePath(lib,pts); state.objects.push(o); ui.selId=o.id; }
   if(lib.kind==='yard') setTool('select'); else draw();
   refresh();
+  if(gapMsg && lib.tool==='poly' && pts.length>=3) notice(gapMsg);   // after setTool, which clears the hint
 }
 
 // ================= Keyboard =================
+// ---- Direct distance entry: while drawing, typing a digit opens a box at the cursor. Enter lays the
+// next vertex that far along the cursor direction (Shift+Enter = ortho). Exact, not snapped. ----
+const lenBox=$('#lenBox');
+function openLenBox(ch){ const sp=ui.mouse||[40,40]; const W=canvas.width/devicePixelRatio, H=canvas.height/devicePixelRatio;
+  // Keep the box inside the canvas. focus({preventScroll}) matters: #canvasWrap is overflow:hidden, which is
+  // still a scroll container, and a plain focus() on a box past the edge scrolls it and shifts the canvas.
+  lenBox.style.left=Math.max(0, Math.min(sp[0]+14, W-104))+'px'; lenBox.style.top=Math.max(0, Math.min(sp[1]+14, H-36))+'px';
+  lenBox.value=ch; lenBox.classList.remove('bad'); lenBox.hidden=false; lenBox.focus({preventScroll:true}); lenBox.setSelectionRange(lenBox.value.length,lenBox.value.length); }
+function closeLenBox(){ if(!lenBox.hidden){ lenBox.hidden=true; lenBox.value=''; } }
+function commitLen(ortho){
+  const L=parseLen(lenBox.value); if(isNaN(L)||L<=0){ lenBox.classList.add('bad'); return; }
+  const pts=ui.drawPts; if(!pts.length){ closeLenBox(); return; }
+  const last=pts[pts.length-1], a=drawDirection(ortho||ui.ortho);
+  const pt=[r2(last[0]+Math.cos(a)*L), r2(last[1]+Math.sin(a)*L)];
+  closeLenBox();
+  // A typed side that lands near the start is the closing side of a traverse: close, report the misclose.
+  if(ui.lib.tool==='poly' && pts.length>=3 && dist(pt,pts[0])<12){ const gap=dist(pt,pts[0]); finishDraw(gap>0.05? `Closed. Closing gap ${fmtLen(gap)} — the last measured side landed ${fmtLen(gap)} from the start.` : 'Closed. Traverse closes exactly.'); return; }
+  pts.push(pt); draw();
+}
+lenBox.addEventListener('keydown', e=>{ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); commitLen(e.shiftKey); } else if(e.key==='Escape'){ e.preventDefault(); closeLenBox(); } });
+lenBox.addEventListener('blur', ()=>closeLenBox());
+lenBox.addEventListener('input', ()=>lenBox.classList.remove('bad'));
+let noticeTimer=null;
+function notice(msg){ const h=$('#hint'); h.textContent=msg; h.hidden=false; clearTimeout(noticeTimer); noticeTimer=setTimeout(()=>{ if(h.textContent===msg){ h.textContent=''; h.hidden=true; } }, 8000); }
+
 window.addEventListener('keydown', e=>{
+  if(e.key==='Shift' && !ui.ortho){ ui.ortho=true; if(ui.tool==='draw') draw(); }
   const tag=e.target.tagName; if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA'){ if(e.key==='Escape') e.target.blur(); return; }
+  if(ui.tool==='draw' && ui.drawPts.length && !e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.]$/.test(e.key)){ e.preventDefault(); openLenBox(e.key); return; }
   const sel=state.objects.find(o=>o.id===ui.selId);
   if(e.code==='Space'){ ui.space=true; e.preventDefault(); return; }
   if(e.ctrlKey||e.metaKey){ if(e.key==='z'){undo();e.preventDefault();} else if(e.key==='y'){redo();e.preventDefault();} else if(e.key==='d'&&sel){ e.preventDefault(); duplicateSel(); } return; }
@@ -98,7 +127,7 @@ window.addEventListener('keydown', e=>{
     case 'ArrowLeft': case 'ArrowRight': case 'ArrowUp': case 'ArrowDown': if(sel){ e.preventDefault(); pushHist(); const d=e.shiftKey?12:6; const dx=e.key==='ArrowLeft'?-d:e.key==='ArrowRight'?d:0, dy=e.key==='ArrowUp'?-d:e.key==='ArrowDown'?d:0; moveObj(sel,dx,dy); refresh(); } break;
   }
 });
-window.addEventListener('keyup', e=>{ if(e.code==='Space') ui.space=false; });
+window.addEventListener('keyup', e=>{ if(e.code==='Space') ui.space=false; if(e.key==='Shift'){ ui.ortho=false; if(ui.tool==='draw') draw(); } });
 function moveObj(o,dx,dy){ if(o.type==='item'){o.x+=dx;o.y+=dy;} else o.pts=o.pts.map(p=>[p[0]+dx,p[1]+dy]); }
 function duplicateSel(){ const sel=state.objects.find(o=>o.id===ui.selId); if(!sel) return; pushHist(); const c=JSON.parse(JSON.stringify(sel)); c.id=uid();
   if(c.kind==='spoint'){ c.props.label=alphaLabel(state.nextLabel++); c.props.bench=false; c.name='Point '+c.props.label; } // a copy is a new reading, never a duplicate label
@@ -152,7 +181,9 @@ function renderProps(){
       if(o.kind==='trench') h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`)+field('Depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">Dig volume ≈ ${(pathLen(o.pts)*o.props.width*o.props.depth/46656).toFixed(2)} cu yd</div>`;
       if(o.kind==='wire') h+=`<div class="note">Low-voltage: keep total fixture watts under transformer rating; 12-ga wire for runs over ~100 ft.</div>`;
     }
-    h+=`<div class="note">Vertices (ft-in):</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td></tr>`).join('')}</table>`;
+    h+=`<div class="note">Vertices:</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td></tr>`).join('')}</table>`;
+    const ne=o.type==='poly'? o.pts.length : o.pts.length-1;
+    h+=`<div class="note">Edges — type a length and the far vertex slides along the edge:</div><table>${Array.from({length:ne},(_,i)=>`<tr><td class="muted">${i+1}→${(i+1)%o.pts.length+1}</td><td><input data-edge="${i}" value="${fmtLen(dist(o.pts[i],o.pts[(i+1)%o.pts.length]))}"></td></tr>`).join('')}</table>`;
   }
   h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'&&o.kind!=='spoint'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
   el.innerHTML=h;
@@ -169,6 +200,7 @@ function renderProps(){
   el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtMNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
   el.querySelectorAll('[data-bench]').forEach(i=> i.onchange=()=>{ pushHist(); state.objects.forEach(x=>{ if(x.kind==='spoint') x.props.bench=false; }); o.props.bench=i.checked; commit(); }); // exactly one benchmark
   el.querySelectorAll('[data-arc]').forEach(b=> b.onclick=()=>{ pushHist(); o.props.arc=+b.dataset.arc; commit(); });
+  el.querySelectorAll('[data-edge]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); const k=+i.dataset.edge, a=o.pts[k], j=(k+1)%o.pts.length, b=o.pts[j]; const L=dist(a,b); if(isNaN(v)||v<=0){ i.value=fmtLen(L); return; } pushHist(); o.pts[j]= L? [r2(a[0]+(b[0]-a[0])*v/L), r2(a[1]+(b[1]-a[1])*v/L)] : [r2(a[0]+v), a[1]]; commit(); });
   el.querySelectorAll('[data-vx],[data-vy]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); const k=i.dataset.vx!=null?0:1; const idx=+(i.dataset.vx??i.dataset.vy); o.pts[idx][k]=v; commit(); });
   $('#pDup').onclick=duplicateSel; $('#pDel').onclick=()=>{ pushHist(); state.objects=state.objects.filter(x=>x!==o); ui.selId=null; refresh(); };
   const pr=$('#pRot'); if(pr) pr.onclick=()=>{ pushHist(); o.rot=(o.rot+90)%360; refresh(); };
@@ -290,7 +322,11 @@ $('#btnBom').onclick=bomCsv;
 $('#btnUndo').onclick=undo; $('#btnRedo').onclick=redo;
 $('#btnGrid').onclick=()=>toggleBtn('btnGrid','showGrid'); $('#btnSnap').onclick=()=>toggleBtn('btnSnap','snap'); $('#btnDims').onclick=()=>toggleBtn('btnDims','showDims'); $('#btnArcs').onclick=()=>toggleBtn('btnArcs','showArcs'); $('#btnFit').onclick=fitView;
 $('#supplyGpm').onchange=e=>{ state.supply.gpm=parseFloat(e.target.value)||0; renderZones(); autosave(); }; $('#supplyPsi').onchange=e=>{ state.supply.psi=parseFloat(e.target.value)||0; renderZones(); autosave(); };
-function syncSupply(){ $('#supplyGpm').value=state.supply.gpm; $('#supplyPsi').value=state.supply.psi; }
+function syncSupply(){ $('#supplyGpm').value=state.supply.gpm; $('#supplyPsi').value=state.supply.psi; syncUnits(); }
+function syncUnits(){ $('#btnUnits').textContent = state.units==='decft'? 'ft.dec' : 'ft-in'; $('#btnUnits').title = state.units==='decft'? 'Showing decimal feet (30.17 ft). Click for feet-inches.' : 'Showing feet-inches (30\'-2"). Click for decimal feet.'; }
+$('#btnUnits').onclick=()=>{ state.units = state.units==='decft'? 'ftin' : 'decft'; syncUnits();
+  const closed=[...document.querySelectorAll('.sec.closed')].map(x=>x.querySelector('h3').textContent); buildLeft(); document.querySelectorAll('.sec').forEach(x=>x.classList.toggle('closed', closed.includes(x.querySelector('h3').textContent)));
+  refresh(); };
 $('#btnPng').onclick=()=>{
   const b=allBounds(); if(!b){ alert('Nothing to export yet.'); return; }
   const ppf = parseFloat(prompt('Pixels per foot for the PNG (24 = ¼"=1\' at 96 dpi, 48 = ½"=1\')','48')); if(!ppf) return;

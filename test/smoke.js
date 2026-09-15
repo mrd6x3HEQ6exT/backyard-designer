@@ -178,6 +178,55 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   eq(mig, [4, '{"a":null,"b":null}'], 'migrate derives nextLabel = max surviving label + 1 (A,C,D → 4) and defaults slope');
   await page.evaluate(() => { ui.selId = null; refresh(); });
 
+  console.log('\n--- measured layout: typed lengths, ortho, closing gap ---');
+  const pl = await page.evaluate(() => ['30.17ft', '30.17 ft', '30.17', "30.17'"].map(parseLen).map(v => Math.round(v * 100) / 100));
+  eq(pl, [362.04, 362.04, 362.04, 362.04], 'parseLen reads 30.17ft (and variants) as 362.04 in');
+  const mv = async (x, y) => { const q = await pt(x, y); await page.mouse.move(q[0], q[1]); };
+  // Generic area below the yard so nothing else is under the cursor. Sides: 30.17 E, 20 S (ortho), 30.17 W, 19.5 N -> 6" short of start.
+  await click('area'); await cw(5 * 12, 32 * 12);
+  await mv(40 * 12, 32 * 12); await page.keyboard.type('30.17'); await page.keyboard.press('Enter');
+  await mv(30 * 12, 60 * 12); await page.keyboard.type('20'); await page.keyboard.press('Shift+Enter');   // cursor ~10 deg off vertical (outside the 5 deg gravity); Shift forces 90
+  await mv(0, 52 * 12);       await page.keyboard.type('30.17'); await page.keyboard.press('Enter');
+  eq(await page.evaluate(() => ui.drawPts), [[60, 384], [422.04, 384], [422.04, 624], [60, 624]], 'typed sides land exactly (362.04 in, not snapped to 6"); ortho straightened the off-axis side');
+  await mv(5 * 12, 20 * 12);  await page.keyboard.type('19.5'); await page.keyboard.press('Enter');
+  const area = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'area'); return { n: o && o.pts.length, hint: document.querySelector('#hint').textContent, drawing: ui.drawPts.length }; });
+  eq([area.n, area.drawing], [4, 0], 'a typed closing side within 12" of the start closes the polygon without adding a 5th vertex');
+  assert(/Closing gap 6"/.test(area.hint), 'closing gap of 6" is reported: ' + JSON.stringify(area.hint));
+  await page.keyboard.press('Escape');
+  eq(await page.evaluate(() => ui.tool), 'select', 'Escape after closing returns to select');
+  const badLen = await page.evaluate(() => { const lb = document.querySelector('#lenBox'); return lb.hidden; });
+  assert(badLen === true, 'length box is hidden when not drawing');
+  // Regression: focusing the length box near the right edge used to scroll #canvasWrap (overflow:hidden is still
+  // a scroll container), shifting the canvas under the cursor and firing mouseleave -> direction lost.
+  await click('fence'); await cw(70 * 12, 40 * 12); await mv(74 * 12, 40 * 12);   // cursor ~20 px from the canvas' right edge at this zoom
+  await page.keyboard.press('1');
+  const edge = await page.evaluate(() => { const w = document.querySelector('#canvasWrap'), lb = document.querySelector('#lenBox'), r = lb.getBoundingClientRect(), c = canvas.getBoundingClientRect(); return { scroll: [w.scrollLeft, w.scrollTop], inside: r.right <= c.right + 1 && r.bottom <= c.bottom + 1, mouseW: ui.mouseW !== null, open: !lb.hidden }; });
+  eq([edge.scroll, edge.inside, edge.mouseW, edge.open], [[0, 0], true, true, true], 'length box at the canvas edge: clamped inside, no scroll, cursor still tracked');
+  await page.keyboard.type('0'); await page.keyboard.press('Enter');
+  eq(await page.evaluate(() => ui.drawPts[1]), [960, 480], 'typed 10 ft at the edge lands due east of the first point');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  // Gravity must not over-reach: a deliberate 30-degree side stays at 30, it is not pulled to 45.
+  await click('fence'); await cw(5 * 12, 40 * 12); await mv(5 * 12 + 200, 40 * 12 + 115.47); await page.keyboard.type('10'); await page.keyboard.press('Enter');
+  eq(await page.evaluate(() => ui.drawPts[1]), [163.92, 540], 'a 30-degree cursor direction gives a 30-degree side (1-degree steps, no 45-degree pull)');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  eq(await page.evaluate(() => [ui.drawPts.length, ui.tool]), [0, 'select'], 'Escape twice cancels the path and returns to select');
+
+  console.log('\n--- measured layout: edge edit + units toggle ---');
+  await page.evaluate(() => { ui.selId = state.objects.find(x => x.kind === 'area').id; refresh(); const i = document.querySelector('[data-edge="0"]'); i.value = '40'; i.dispatchEvent(new Event('change')); });
+  eq(await page.evaluate(() => state.objects.find(x => x.kind === 'area').pts[1]), [540, 384], 'editing edge 1 to 40 ft slides vertex 2 along the edge to exactly 480 in from vertex 1');
+  await page.evaluate(() => { const i = document.querySelector('[data-edge="0"]'); i.value = 'garbage'; i.dispatchEvent(new Event('change')); });
+  eq(await page.evaluate(() => [state.objects.find(x => x.kind === 'area').pts[1], document.querySelector('[data-edge="0"]').value]), [[540, 384], "40'"], 'garbage edge input is rejected and the field restored');
+  await page.click('#btnUnits');
+  const u = await page.evaluate(() => ({ units: state.units, s: fmtLen(362.04), neg: fmtLen(-124 / 25.4), back: parseLen(fmtLen(362.04)), btn: document.querySelector('#btnUnits').textContent, edge: document.querySelector('[data-edge="2"]').value, lib: document.querySelector('.libitem[data-id="paver16"] .dim').textContent }));
+  eq([u.units, u.s, u.btn], ['decft', '30.17 ft', 'ft.dec'], 'units toggle switches display to decimal feet');
+  eq(u.neg, '-0.41 ft', 'negative lengths keep their sign in decimal feet');
+  assert(Math.abs(u.back - 362.04) < 1e-6, 'decimal-feet display round-trips through parseLen');
+  eq([u.edge, u.lib], ['30.17 ft', '1.33 ft×1.33 ft'], 'Edges table and library badges follow the units toggle');
+  await page.click('#btnUnits');
+  eq(await page.evaluate(() => [state.units, fmtLen(362.04)]), ['ftin', '30\'-2"'], 'toggle back to feet-inches');
+  eq(await page.evaluate(() => { const st = JSON.parse(JSON.stringify(state)); delete st.units; migrate(st); return st.units; }), 'ftin', 'migrate defaults units for older files');
+  await page.evaluate(() => { ui.selId = null; refresh(); });
+
   console.log('\n--- JSON round-trip ---');
   const n1 = await page.evaluate(() => state.objects.length);
   const json = await page.evaluate(() => JSON.stringify(state));
