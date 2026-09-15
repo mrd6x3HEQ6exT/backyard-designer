@@ -2,8 +2,15 @@ MISTAKE LOG — self-check file, not for human reading. Newest first.
 Standing rule: before any build/code change, grep this file (tags below) as a
 visible tool call. Grep again before shipping. No visible tool call = not done.
 
-TAGS (newest first): weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
+TAGS (newest first): trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
 
+---
+TAG: trailing-comment-swallows-line
+IF: doing scripted string replacement on a PREFIX of a line (anchor shorter than the line)
+WHAT: replacement text ended with a // comment; the untouched remainder of the original line was appended after it and silently commented out. duplicateSel() lost its closing brace; script block failed to parse.
+WHY: replaced a line prefix, not a whole line, and put a line comment at the end of the inserted text
+RESULT: one build cycle lost to a syntax error that looked like it came from somewhere else ("unexpected end of input" at EOF)
+FIX: when the anchor is a prefix, end the replacement with a newline before any // comment, or use a /* */ comment, or anchor on the whole line. syntax.js caught it — keep running it before smoke.js.
 ---
 TAG: weak-negative-test
 IF: proving a regression test actually catches the bug it was written for

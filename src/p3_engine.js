@@ -10,6 +10,8 @@ function newState(){
     supply:{gpm:6, psi:50},
     prices:Object.assign({}, DEFAULT_PRICES),
     nextId:1,
+    nextLabel:0,                 // survey label counter; never reused, so labels stay stable across deletes
+    slope:{a:null, b:null},      // the two survey point ids picked in the Survey tab slope tool
   };
 }
 const view = {scale:2, ox:60, oy:60};   // px per inch, screen offset
@@ -66,10 +68,30 @@ const plantSpec = o => PLANTS.find(p=>p.id===o.props.plant) || PLANTS[0];
 const headGpm = o => { const h=headSpec(o); const r=o.props.radius/12; return +(h.gpm360*(o.props.arc/360)*(h.strip?1:Math.pow(r/h.radius,2))).toFixed(2); };
 // Note: GPM scales ~ with area for matched-precip rotators; that is also a fair approximation for radius-reduced sprays.
 
+// ---- Survey / grade helpers. Readings live in mm; plan geometry stays in inches. ----
+// Bijective base-26: 0->A, 25->Z, 26->AA, 27->AB, 701->ZZ, 702->AAA (spreadsheet column order).
+function alphaLabel(n){ let s=''; n=n+1; while(n>0){ n--; s=String.fromCharCode(65+n%26)+s; n=Math.floor(n/26); } return s; }
+function labelIndex(s){ let n=0; for(const ch of String(s).toUpperCase()) n=n*26+(ch.charCodeAt(0)-64); return n-1; }
+const mmToIn = mm => mm/25.4;
+const fmtM   = mm => (mm/1000).toFixed(3)+' m';
+const fmtMNum= mm => (mm/1000).toFixed(3);
+const fmtCm  = (mm, sign=true) => { const v=mm/10; return (sign&&v>0?'+':'')+v.toFixed(1)+' cm'; };
+// Accepts 1.235, 1.235m, 123.5cm, 1235mm (unit defaults to metres). Returns integer mm, or NaN.
+function parseMetric(s){ const m=String(s).trim().toLowerCase().match(/^(-?\d+(?:\.\d+)?)\s*(m|cm|mm)?$/); if(!m) return NaN; const v=parseFloat(m[1]); return Math.round(m[2]==='cm'? v*10 : m[2]==='mm'? v : v*1000); }
+const benchPoint = () => state.objects.find(o=>o.kind==='spoint'&&o.props.bench);
+// Elevation relative to the benchmark. A higher rod reading means lower ground, so delta = bench - reading.
+function deltaMm(o){ const bm=benchPoint(); if(!bm||bm.props.reading==null||o.props.reading==null) return null; return bm.props.reading-o.props.reading; }
+// Slope needs no benchmark: rise between two points is just the difference of their readings.
+function slopeBetween(A,B){ if(A.props.reading==null||B.props.reading==null) return null; const run=dist([A.x,A.y],[B.x,B.y]); if(!run) return null; const riseMm=A.props.reading-B.props.reading; const riseIn=mmToIn(riseMm); return {run, riseMm, riseIn, pct:riseIn/run*100, inPerFt:riseIn/(run/12)}; }
+function surveyLabel(o){ const L=o.props.label; if(o.props.bench) return L+' BM'; if(o.props.reading==null) return L; const d=deltaMm(o); return L+' '+(d==null? fmtM(o.props.reading) : fmtCm(d)); }
+
 // ================= History / persistence =================
-function pushHist(){ ui.hist.push(JSON.stringify(state.objects)); if(ui.hist.length>100) ui.hist.shift(); ui.redo.length=0; }
-function undo(){ if(!ui.hist.length) return; ui.redo.push(JSON.stringify(state.objects)); state.objects=JSON.parse(ui.hist.pop()); ui.selId=null; refresh(); }
-function redo(){ if(!ui.redo.length) return; ui.hist.push(JSON.stringify(state.objects)); state.objects=JSON.parse(ui.redo.pop()); ui.selId=null; refresh(); }
+// Snapshots carry the survey label counter alongside objects so undoing a placement rolls it back.
+const histSnap = () => JSON.stringify({o:state.objects, n:state.nextLabel});
+const histRestore = s => { const j=JSON.parse(s); state.objects=j.o; state.nextLabel=j.n; };
+function pushHist(){ ui.hist.push(histSnap()); if(ui.hist.length>100) ui.hist.shift(); ui.redo.length=0; }
+function undo(){ if(!ui.hist.length) return; ui.redo.push(histSnap()); histRestore(ui.hist.pop()); ui.selId=null; refresh(); }
+function redo(){ if(!ui.redo.length) return; ui.hist.push(histSnap()); histRestore(ui.redo.pop()); ui.selId=null; refresh(); }
 let saveTimer=null;
 function autosave(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{ try{ localStorage.setItem('byd.state', JSON.stringify(state)); $('#stSave').textContent='autosaved '+new Date().toLocaleTimeString(); }catch(e){} },400); }
 function loadAutosave(){ try{ const s=localStorage.getItem('byd.state'); if(s){ const st=JSON.parse(s); migrate(st); state=st; return true; } }catch(e){} return false; }
@@ -78,14 +100,18 @@ function migrate(st){
   st.prices = Object.assign({}, DEFAULT_PRICES, st.prices||{});
   st.supply = st.supply||{gpm:6,psi:50};
   st.objects = st.objects||[]; st.nextId = st.nextId||(st.objects.length+1);
+  st.slope = st.slope||{a:null,b:null};
+  if(st.nextLabel==null){ const idx=st.objects.filter(o=>o.kind==='spoint'&&o.props&&o.props.label).map(o=>labelIndex(o.props.label)); st.nextLabel = idx.length? Math.max(...idx)+1 : 0; }
   st.objects.forEach(o=>{ o.props=o.props||{}; if(o.rot==null) o.rot=0; });
 }
 
 // ================= Object creation =================
 function makePoly(lib, pts){ return {id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: lib.kind==='planter'?{}: {}}; }
 function makePath(lib, pts){ return {id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='trench'?{width:6,depth:18}:{}}; }
-function makeItem(lib, x, y){
+// ghost=true is the cursor preview: it shows the next label without consuming it.
+function makeItem(lib, x, y, ghost){
   const o={id:uid(), type:'item', kind:lib.kind, layer:lib.layer, name:lib.name, x, y, w:lib.w, h:lib.h, rot:0, shape:lib.shape, color:lib.color, props:Object.assign({}, lib.props||{})};
+  if(lib.kind==='spoint'){ const L=alphaLabel(ghost? state.nextLabel : state.nextLabel++); o.props={label:L, reading:null, bench:false, note:''}; o.name='Point '+L; }
   if(lib.kind==='head'){ const h=HEADS[0]; o.props={model:h.id, radius:h.radius*12, arc:180, start:0, zone:1}; o.name=h.brand+' '+h.name; }
   if(lib.kind==='plant'){ const p=PLANTS.find(p=>p.id===lib.props.plant); o.name=p.name.split(' (')[0].split(' —')[0]; }
   return o;
@@ -123,7 +149,7 @@ function hitTest(pw){
 function handleHit(o, pw){ // returns {type:'vertex',i} | {type:'mid',i} | {type:'resize'} | null
   const tol=8/view.scale;
   if(o.type==='item'){
-    if(o.shape==='text') return null;
+    if(o.shape==='text'||o.shape==='spoint') return null;
     const lp=toLocal(o,pw); const b=itemBox(o);
     if(Math.hypot(lp[0]-(b.x+b.w), lp[1]-(b.y+b.h))<=tol) return {type:'resize'};
     if(o.kind==='head' && ui.showArcs){ // radius handle at end of arc bisector
@@ -151,7 +177,7 @@ function draw(){
   ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
   ctx.clearRect(0,0,W,H); ctx.fillStyle='#fafaf7'; ctx.fillRect(0,0,W,H);
   if(ui.showGrid) drawGrid(W,H);
-  const order = ['base','hardscape','trench','plants','irrigation','conduit','lighting','notes'];
+  const order = ['base','hardscape','trench','plants','irrigation','conduit','lighting','notes','survey'];
   const sel = state.objects.find(o=>o.id===ui.selId);
   for(const lid of order){ if(!state.layers[lid]?.visible) continue;
     for(const o of state.objects){ if(o.layer!==lid) continue; drawObj(o, o===sel); } }
@@ -215,11 +241,16 @@ function drawItem(o, selected, st){
   ctx.lineWidth= selected?2.5:1.5; ctx.strokeStyle= selected?'#4fa3ff':'#222';
   if(o.shape==='text'){ ctx.rotate(0); ctx.font=(o.props.size||12)*Math.max(.6,Math.min(3,s/2))+'px system-ui'; ctx.textAlign='left'; ctx.textBaseline='bottom'; ctx.fillStyle=o.color||'#333'; ctx.fillText(o.props.text||'', 0, 0); if(selected){ctx.strokeStyle='#4fa3ff';ctx.strokeRect(-2,-(o.props.size||12)*Math.max(.6,Math.min(3,s/2))-2, ctx.measureText(o.props.text||'').width+4,(o.props.size||12)*Math.max(.6,Math.min(3,s/2))+4);} ctx.restore(); return; }
   if(o.shape==='plant'){ const p=plantSpec(o); ctx.fillStyle=hexA(p?p.color:'#8bc34a',.5); ctx.beginPath(); ctx.ellipse(0,0,w/2,h/2,0,0,7); ctx.fill(); ctx.strokeStyle=selected?'#4fa3ff':'#2e7d32'; ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle='#2e7d32'; ctx.beginPath(); ctx.arc(0,0,3,0,7); ctx.fill(); }
+  else if(o.shape==='spoint'){ // fixed screen size so it stays readable at any zoom
+    const bm=!!o.props.bench; ctx.lineWidth=selected?2.5:2; ctx.strokeStyle=selected?'#4fa3ff':'#880e4f'; ctx.fillStyle=bm?'#fff':'#d81b60';
+    ctx.beginPath(); ctx.arc(0,0,5,0,7); ctx.fill(); ctx.stroke(); if(bm){ ctx.fillStyle='#d81b60'; ctx.beginPath(); ctx.arc(0,0,2.5,0,7); ctx.fill(); } }
   else if(o.shape==='head'){ const zc=zoneColor(o.props.zone); ctx.fillStyle=zc; ctx.beginPath(); ctx.arc(0,0,Math.max(5,w/2),0,7); ctx.fill(); ctx.stroke(); }
   else if(o.shape==='circle'){ ctx.fillStyle=hexA(o.color,.55); ctx.beginPath(); ctx.ellipse(0,0,w/2,h/2,0,0,7); ctx.fill(); ctx.stroke(); if(o.kind==='fountain'){ ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1; for(let r=w/2*.75;r>3;r*=.6){ctx.beginPath();ctx.arc(0,0,r,0,7);ctx.stroke();} } if(o.kind==='tree'){ ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(0,0,w/2*.5,0,7); ctx.stroke(); } }
   else { ctx.fillStyle=hexA(o.color,.6); ctx.fillRect(-w/2,-h/2,w,h); ctx.strokeRect(-w/2,-h/2,w,h);
     if(o.kind==='gfci'||o.kind==='panel'){ ctx.fillStyle='#000'; ctx.font='bold '+Math.max(8,Math.min(14,h*.6))+'px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(o.kind==='gfci'?'⏚':'P',0,0); } }
   ctx.restore();
+  // Survey labels are the data, not decoration: always drawn, independent of the Dims toggle.
+  if(o.kind==='spoint'){ label(surveyLabel(o), [c[0], c[1]-11], {bold:true, size:11, color:'#880e4f'}); return; }
   if(ui.showDims){ const off=Math.max(o.h*s/2, 8)+9; const nm = o.kind==='head'? (headSpec(o).name.replace('MP Rotator ','').replace(' rotary nozzle','').replace(' spray nozzle','')+' Z'+o.props.zone+' '+(o.props.radius/12)+"' "+o.props.arc+'°') : o.name; label(nm, [c[0], c[1]+off], {size:10, color:'#333'}); if(selected && o.kind!=='head') label(fmtLen(o.w)+' × '+fmtLen(o.h), [c[0], c[1]+off+12], {size:10, color:'#1a3d6b'}); }
 }
 function drawHeadArc(o, selected){
@@ -232,7 +263,7 @@ function hexA(hex,a){ if(!hex||hex[0]!=='#') return hex; const n=parseInt(hex.sl
 function drawHandles(o){
   ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; ctx.lineWidth=1.5;
   if(o.type==='item'){
-    if(o.shape==='text') return;
+    if(o.shape==='text'||o.shape==='spoint') return;
     const c=w2s([o.x,o.y]); ctx.save(); ctx.translate(c[0],c[1]); ctx.rotate(o.rot*Math.PI/180); const w=o.w*view.scale,h=o.h*view.scale; ctx.fillRect(w/2-4,h/2-4,8,8); ctx.strokeRect(w/2-4,h/2-4,8,8); ctx.restore();
     if(o.kind==='head'&&ui.showArcs){ const draw=(ang,rad,fill)=>{const x=c[0]+Math.cos(ang)*rad,y=c[1]+Math.sin(ang)*rad; ctx.fillStyle=fill; ctx.beginPath(); ctx.arc(x,y,5,0,7); ctx.fill(); ctx.stroke();};
       draw((o.props.start+o.props.arc/2)*Math.PI/180, o.props.radius*view.scale, '#fff'); draw(o.props.start*Math.PI/180, o.props.radius*view.scale*.6, '#ffb347'); draw((o.props.start+o.props.arc)*Math.PI/180, o.props.radius*view.scale*.6, '#ffb347'); }
@@ -244,7 +275,7 @@ function drawHandles(o){
   sp.forEach(p=>{ ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p[0],p[1],5,0,7); ctx.fill(); ctx.stroke(); });
 }
 function drawDrawing(){
-  if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1])); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
+  if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1]), true); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
   const pts = ui.drawPts.concat(ui.mouseW? [[snap(ui.mouseW[0]),snap(ui.mouseW[1])]] : []);
   const sp=pts.map(w2s); const st=KIND_STYLE[ui.lib.kind]||{stroke:'#333'};
   ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));

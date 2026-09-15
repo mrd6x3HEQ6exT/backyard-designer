@@ -11,9 +11,9 @@ function setTool(id, lib){ ui.tool=id; ui.lib=lib||null; ui.drawPts=[]; ui.measu
 function buildLeft(){
   $('#toolBtns').innerHTML = TOOLS.map(t=>`<button data-id="${t.id}">${t.name}</button>`).join('');
   $('#toolBtns').querySelectorAll('button').forEach(b=> b.onclick=()=>setTool(b.dataset.id));
-  const groups={areas:'#libAreas',runs:'#libRuns',irrigation:'#libIrrigation',electrical:'#libElectrical',lighting:'#libLighting',hardscape:'#libHardscape',plants:'#libPlants'};
+  const groups={areas:'#libAreas',runs:'#libRuns',survey:'#libSurvey',irrigation:'#libIrrigation',electrical:'#libElectrical',lighting:'#libLighting',hardscape:'#libHardscape',plants:'#libPlants'};
   for(const [g,sel] of Object.entries(groups)){
-    $(sel).innerHTML = LIB[g].map(e=>`<div class="libitem" data-id="${e.id}" title="${esc(e.name)}"><span class="sw ${e.shape==='circle'||e.shape==='plant'?'circle':''}" style="background:${e.color}"></span><span>${e.name}</span>${e.w?`<span class="dim">${e.kind==='plant'?fmtLen(e.w)+' spread':fmtLen(e.w)+'×'+fmtLen(e.h)}</span>`:''}</div>`).join('');
+    $(sel).innerHTML = LIB[g].map(e=>`<div class="libitem" data-id="${e.id}" title="${esc(e.name)}"><span class="sw ${e.shape==='circle'||e.shape==='plant'?'circle':''}" style="background:${e.color}"></span><span>${e.name}</span>${e.w&&e.kind!=='spoint'?`<span class="dim">${e.kind==='plant'?fmtLen(e.w)+' spread':fmtLen(e.w)+'×'+fmtLen(e.h)}</span>`:''}</div>`).join('');
     $(sel).querySelectorAll('.libitem').forEach(d=> d.onclick=()=>{ const e=libById(d.dataset.id); setTool(e.tool==='item'?'place':'draw', e); });
   }
   document.querySelectorAll('.sec h3').forEach(h=> h.onclick=()=>h.parentElement.classList.toggle('closed'));
@@ -100,12 +100,14 @@ window.addEventListener('keydown', e=>{
 });
 window.addEventListener('keyup', e=>{ if(e.code==='Space') ui.space=false; });
 function moveObj(o,dx,dy){ if(o.type==='item'){o.x+=dx;o.y+=dy;} else o.pts=o.pts.map(p=>[p[0]+dx,p[1]+dy]); }
-function duplicateSel(){ const sel=state.objects.find(o=>o.id===ui.selId); if(!sel) return; pushHist(); const c=JSON.parse(JSON.stringify(sel)); c.id=uid(); moveObj(c,12,12); state.objects.push(c); ui.selId=c.id; refresh(); }
+function duplicateSel(){ const sel=state.objects.find(o=>o.id===ui.selId); if(!sel) return; pushHist(); const c=JSON.parse(JSON.stringify(sel)); c.id=uid();
+  if(c.kind==='spoint'){ c.props.label=alphaLabel(state.nextLabel++); c.props.bench=false; c.name='Point '+c.props.label; } // a copy is a new reading, never a duplicate label
+  moveObj(c,12,12); state.objects.push(c); ui.selId=c.id; refresh(); }
 function toggleBtn(id,prop){ ui[prop]=!ui[prop]; $('#'+id).classList.toggle('active',ui[prop]); draw(); }
 function fitView(){ const b=allBounds(); const W=canvas.width/devicePixelRatio, H=canvas.height/devicePixelRatio; if(!b){ view.scale=2; view.ox=60; view.oy=60; draw(); return; } const w=b.x1-b.x0+48, h=b.y1-b.y0+48; view.scale=Math.min(40,Math.max(0.15,Math.min(W/w,H/h))); view.ox=(W-(b.x0+b.x1)*view.scale)/2; view.oy=(H-(b.y0+b.y1)*view.scale)/2; draw(); }
 
 // ================= Right panel =================
-function refresh(){ draw(); renderProps(); renderLayers(); renderZones(); renderBom(); autosave(); }
+function refresh(){ draw(); renderProps(); renderLayers(); renderZones(); renderBom(); renderSurvey(); autosave(); }
 document.querySelectorAll('#tabs button').forEach(b=> b.onclick=()=>{ document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b)); document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id==='tab-'+b.dataset.tab)); });
 function field(label, inputHtml){ return `<div class="row"><label>${label}</label>${inputHtml}</div>`; }
 function renderProps(){
@@ -116,7 +118,17 @@ function renderProps(){
   h+=field('Layer', `<select data-p="layer">${LAYERS.map(l=>`<option value="${l.id}" ${l.id===o.layer?'selected':''}>${l.name}</option>`).join('')}</select>`);
   if(o.type==='item'){
     h+=field('Center X', `<input data-len="x" value="${fmtLen(o.x)}">`)+field('Center Y', `<input data-len="y" value="${fmtLen(o.y)}">`);
-    if(o.shape!=='text'&&o.kind!=='head'){ h+=field('Width', `<input data-len="w" value="${fmtLen(o.w)}">`); h+=field('Height/Depth', `<input data-len="h" value="${fmtLen(o.h)}">`); h+=field('Rotation °', `<input type="number" data-num="rot" value="${o.rot}" step="5">`); }
+    if(o.kind==='spoint'){ const bm=benchPoint(); const d=deltaMm(o);
+      h+=field('Label', `<input value="${o.props.label}" disabled>`);
+      h+=field('Reading', `<input data-mprop="reading" value="${o.props.reading==null?'':fmtMNum(o.props.reading)}" placeholder="1.235"> <span class="muted" style="font-size:11px;white-space:nowrap">m</span>`);
+      h+=field('Benchmark', `<input type="checkbox" data-bench ${o.props.bench?'checked':''}>`);
+      h+=field('Note', `<input data-prop="note" value="${esc(o.props.note||'')}">`);
+      if(o.props.reading==null) h+=`<div class="note">Rod reading in metres. 1.235, 1.235m, 123.5cm and 1235mm all work.</div>`;
+      else if(o.props.bench) h+=`<div class="note">Benchmark. Every other point shows its height relative to this one.</div>`;
+      else if(d==null) h+=`<div class="note">Tick Benchmark on one point to see relative elevation.</div>`;
+      else h+=`<div class="note">Δ from ${bm.props.label}: <b>${fmtCm(d)}</b> · ${fmtLen(mmToIn(d))} ${d<0?'lower':d>0?'higher':'level'}</div>`;
+    }
+    if(o.shape!=='text'&&o.kind!=='head'&&o.kind!=='spoint'){ h+=field('Width', `<input data-len="w" value="${fmtLen(o.w)}">`); h+=field('Height/Depth', `<input data-len="h" value="${fmtLen(o.h)}">`); h+=field('Rotation °', `<input type="number" data-num="rot" value="${o.rot}" step="5">`); }
     if(o.kind==='head'){ const hs=headSpec(o);
       h+=field('Model', `<select data-prop="model">${HEADS.map(x=>`<option value="${x.id}" ${x.id===hs.id?'selected':''}>#${x.rank} ${x.brand} ${x.name}</option>`).join('')}</select>`);
       h+=field('Radius', `<input data-lenprop="radius" value="${fmtLen(o.props.radius)}"> <span class="muted" style="font-size:11px;white-space:nowrap">${hs.rmin}–${hs.rmax} ft</span>`);
@@ -142,7 +154,7 @@ function renderProps(){
     }
     h+=`<div class="note">Vertices (ft-in):</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td></tr>`).join('')}</table>`;
   }
-  h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
+  h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'&&o.kind!=='spoint'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
   el.innerHTML=h;
   const commit=()=>{ refresh(); };
   el.querySelectorAll('[data-p]').forEach(i=> i.onchange=()=>{ pushHist(); o[i.dataset.p]=i.value; commit(); });
@@ -154,6 +166,8 @@ function renderProps(){
     o.props[i.dataset.numprop]=Math.min(mx,Math.max(mn,v)); commit(); });
   el.querySelectorAll('[data-lenprop]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); o.props[i.dataset.lenprop]=v; if(i.dataset.lenprop==='radius'){ const hs=headSpec(o); o.props.radius=Math.min(hs.rmax*12,Math.max(hs.rmin*12,v)); } commit(); });
   el.querySelectorAll('[data-boolprop]').forEach(i=> i.onchange=()=>{ pushHist(); o.props[i.dataset.boolprop]=i.checked; commit(); });
+  el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtMNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
+  el.querySelectorAll('[data-bench]').forEach(i=> i.onchange=()=>{ pushHist(); state.objects.forEach(x=>{ if(x.kind==='spoint') x.props.bench=false; }); o.props.bench=i.checked; commit(); }); // exactly one benchmark
   el.querySelectorAll('[data-arc]').forEach(b=> b.onclick=()=>{ pushHist(); o.props.arc=+b.dataset.arc; commit(); });
   el.querySelectorAll('[data-vx],[data-vy]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); const k=i.dataset.vx!=null?0:1; const idx=+(i.dataset.vx??i.dataset.vy); o.pts[idx][k]=v; commit(); });
   $('#pDup').onclick=duplicateSel; $('#pDel').onclick=()=>{ pushHist(); state.objects=state.objects.filter(x=>x!==o); ui.selId=null; refresh(); };
@@ -237,6 +251,33 @@ function renderBom(){
   h+='</table>'+`<h4>Total</h4><div style="font-size:16px"><b>$${total.toFixed(2)}</b></div><div class="note">Prices are editable placeholders and save with the design. Items sharing a key share a price.</div>`;
   el.innerHTML=h; el.querySelectorAll('[data-price]').forEach(i=> i.onchange=()=>{ state.prices[i.dataset.price]=parseFloat(i.value)||0; renderBom(); autosave(); });
 }
+// ================= Survey tab =================
+function surveyPoints(){ return state.objects.filter(o=>o.kind==='spoint').sort((a,b)=>labelIndex(a.props.label)-labelIndex(b.props.label)); }
+function renderSurvey(){
+  const el=$('#tab-survey'); const pts=surveyPoints();
+  if(!pts.length){ el.innerHTML='<div class="note">No survey points yet. Survey / grade → Survey point, then click where you read the rod. Points are labelled A, B, C … Z, AA, AB … and keep their label if you delete another. Enter each reading in Properties and tick Benchmark on one point.</div>'; return; }
+  const bm=benchPoint();
+  let h=bm? `<div class="note">Benchmark <b>${bm.props.label}</b>${bm.props.reading!=null?' · reading '+fmtM(bm.props.reading):' <span class="warn">(no reading yet)</span>'}. Δ = benchmark reading − point reading, so positive is higher ground.</div>`
+          : '<div class="note"><span class="warn">No benchmark.</span> Tick Benchmark on one point in Properties to get relative elevations.</div>';
+  h+='<table><tr><th>Pt</th><th class="n">Reading</th><th class="n">Δ cm</th><th class="n">Δ in</th><th>Note</th></tr>';
+  pts.forEach(o=>{ const d=deltaMm(o); h+=`<tr><td><b>${o.props.label}</b>${o.props.bench?' <span class="muted">BM</span>':''}</td><td class="n">${o.props.reading==null?'<span class="muted">—</span>':fmtM(o.props.reading)}</td><td class="n">${d==null?'':fmtCm(d)}</td><td class="n">${d==null?'':fmtLen(mmToIn(d))}</td><td class="muted">${esc(o.props.note||'')}</td></tr>`; });
+  h+='</table>';
+  const withD=pts.filter(o=>deltaMm(o)!=null);
+  if(withD.length>1){ const hi=withD.reduce((a,b)=>deltaMm(b)>deltaMm(a)?b:a), lo=withD.reduce((a,b)=>deltaMm(b)<deltaMm(a)?b:a); const fall=deltaMm(hi)-deltaMm(lo);
+    h+=`<div class="note">Highest <b>${hi.props.label}</b> (${fmtCm(deltaMm(hi))}) · lowest <b>${lo.props.label}</b> (${fmtCm(deltaMm(lo))}) · total fall <b>${fmtCm(fall,false)}</b> / ${fmtLen(mmToIn(fall))}</div>`; }
+  const opt=sel=>'<option value="">—</option>'+pts.map(o=>`<option value="${o.id}" ${o.id===sel?'selected':''}>${o.props.label}</option>`).join('');
+  h+=`<h4>Slope</h4><div class="row"><label>From</label><select data-slope="a">${opt(state.slope.a)}</select><label style="width:auto">to</label><select data-slope="b">${opt(state.slope.b)}</select></div>`;
+  const A=pts.find(o=>o.id===state.slope.a), B=pts.find(o=>o.id===state.slope.b);
+  if(A&&B&&A!==B){ const s=slopeBetween(A,B);
+    if(!s) h+='<div class="note">Both points need a reading.</div>';
+    else h+=`<div class="note">Run <b>${fmtLen(s.run)}</b> · rise <b>${fmtCm(s.riseMm)}</b> / ${fmtLen(s.riseIn)} · slope <b>${s.pct.toFixed(2)}%</b> · <b>${s.inPerFt.toFixed(2)} in/ft</b> — ${s.riseMm<0?'falls':s.riseMm>0?'rises':'level'} from ${A.props.label} to ${B.props.label}<br><span class="muted">Drainage rule of thumb: ≥2% (¼ in/ft) away from the house for the first 10 ft.</span></div>`; }
+  h+='<div class="btnrow"><button id="btnSurveyCsv">Survey CSV</button></div>';
+  el.innerHTML=h;
+  el.querySelectorAll('[data-slope]').forEach(s=> s.onchange=()=>{ state.slope[s.dataset.slope]=s.value||null; renderSurvey(); autosave(); });
+  $('#btnSurveyCsv').onclick=()=>download('survey.csv', surveyCsvText(), 'text/csv');
+}
+function surveyCsvText(){ let s='Point,Reading_m,Delta_cm,Delta_in,X_ft,Y_ft,Benchmark,Note\n'; surveyPoints().forEach(o=>{ const d=deltaMm(o); s+=[o.props.label, o.props.reading==null?'':(o.props.reading/1000).toFixed(3), d==null?'':(d/10).toFixed(1), d==null?'':mmToIn(d).toFixed(2), (o.x/12).toFixed(2), (o.y/12).toFixed(2), o.props.bench?'yes':'', o.props.note||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); return s; }
+
 function bomCsv(){ const rows=computeBom(); let s='Category,Item,Qty,Unit,UnitPrice,Ext,Note\n'; rows.forEach(r=>{ const p=state.prices[r.key]??0; s+=[r.cat,r.item,r.qty,r.unit,p,(p*r.qty).toFixed(2),r.note].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); download('backyard-bom.csv', s, 'text/csv'); }
 
 // ================= IO =================

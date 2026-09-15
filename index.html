@@ -49,7 +49,7 @@ input[type=range]{padding:0}
 .libitem .dim{margin-left:auto;color:var(--muted);font-size:11px}
 .libitem.active .dim{color:#04182e}
 #tabs{display:flex;border-bottom:1px solid var(--line)}
-#tabs button{flex:1;border-radius:0;border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 4px}
+#tabs button{flex:1;border-radius:0;border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 2px;font-size:12px}
 #tabs button.active{background:transparent;color:var(--acc);border-bottom-color:var(--acc)}
 .tab{display:none;overflow-y:auto;padding:10px;flex:1;min-height:0}
 .tab.active{display:block}
@@ -109,6 +109,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
     <div class="sec"><h3>Tools</h3><div class="body tools" id="toolBtns"></div></div>
     <div class="sec"><h3>Draw areas</h3><div class="body" id="libAreas"></div></div>
     <div class="sec"><h3>Runs (lines)</h3><div class="body" id="libRuns"></div></div>
+    <div class="sec"><h3>Survey / grade</h3><div class="body" id="libSurvey"></div></div>
     <div class="sec"><h3>Irrigation</h3><div class="body" id="libIrrigation"></div></div>
     <div class="sec"><h3>Electrical / conduit</h3><div class="body" id="libElectrical"></div></div>
     <div class="sec"><h3>Lighting</h3><div class="body" id="libLighting"></div></div>
@@ -126,12 +127,14 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
       <button data-tab="layers">Layers</button>
       <button data-tab="zones">Zones</button>
       <button data-tab="bom">BOM</button>
+      <button data-tab="survey">Survey</button>
       <button data-tab="help">Help</button>
     </div>
     <div class="tab active" id="tab-props"></div>
     <div class="tab" id="tab-layers"></div>
     <div class="tab" id="tab-zones"></div>
     <div class="tab" id="tab-bom"></div>
+    <div class="tab" id="tab-survey"></div>
     <div class="tab" id="tab-help">
       <h4>Workflow</h4>
       <div class="note">1. Draw the yard outline first (Draw areas → Yard). Click grid points; click the first point or press Enter to close. Every edge is dimensioned automatically and updates when you drag a vertex.</div>
@@ -145,6 +148,8 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
       <div class="note"><kbd>V</kbd> select <kbd>H</kbd> pan <kbd>M</kbd> measure <kbd>Enter</kbd> finish <kbd>Esc</kbd> cancel <kbd>Del</kbd> delete <kbd>R</kbd> rotate 15° (<kbd>Shift</kbd>+<kbd>R</kbd> 90°) <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo <kbd>G</kbd> grid <kbd>S</kbd> snap <kbd>D</kbd> dims <kbd>F</kbd> fit <kbd>arrows</kbd> nudge 6"</div>
       <h4>Lengths</h4>
       <div class="note">Type lengths as <code>12'6"</code>, <code>12' 6</code>, <code>12.5</code> (feet), or <code>150in</code>.</div>
+      <h4>Survey / grade</h4>
+      <div class="note">Set the level up once, then read the grade rod at each spot. Survey / grade → Survey point, click to place. Points are labelled A, B, C … Z, AA, AB … and never renumber when one is deleted, so they match your notebook. Enter each reading in Properties (metres — 1.235, 123.5cm, 1235mm all work). Tick Benchmark on one point; every other point then shows its height relative to it in cm and inches. Higher reading = lower ground. The Survey tab lists all points, finds the high and low, and gives slope between any two as % and in/ft.</div>
       <h4>Data notes</h4>
       <div class="note">Head radius/GPM figures are manufacturer nominal values at the listed pressure; GPM scales with arc. Verify against the nozzle chart for your actual pressure. Orbit 50020 kit requires ≥50 PSI and ≥5 GPM at the hose bib.</div>
       <div class="note">Conduit rules of thumb (NEC): ≤360° of bends between pull points; PVC branch circuits buried 18" to top of conduit (12" if GFCI-protected 20A or less, 120V — check local code).</div>
@@ -155,7 +160,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
 </div>
 <script>
 'use strict';
-const BUILD_ID = '2026.09.08.3';
+const BUILD_ID = '2026.09.14.1';
 const GRID = 6;           // inches
 const FT = 12;
 
@@ -169,6 +174,7 @@ const LAYERS = [
   {id:'plants',     name:'Plants',                         color:'#43a047'},
   {id:'trench',     name:'Trench / dig plan',              color:'#6d4c41'},
   {id:'notes',      name:'Notes / labels',                 color:'#555555'},
+  {id:'survey',     name:'Survey / grade',                 color:'#d81b60'},
 ];
 
 // ---------- Sprinkler head database, ranked best -> worst for a small hose-bib-fed lawn ----------
@@ -261,6 +267,11 @@ const LIB = {
     {id:'wall',     name:'Wall wash / step light',tool:'item',kind:'walllight',layer:'lighting',w:6,h:2, shape:'rect',   color:'#8e24aa', props:{watts:3}},
     {id:'string',   name:'String light post',tool:'item', kind:'stringpost',layer:'lighting',w:4,h:4, shape:'circle', color:'#ce93d8', props:{watts:0}},
   ],
+  // Survey points are the one metric thing in the app: rod readings are stored in mm (props.reading),
+  // because the grade rod is metric. Plan geometry stays in inches. See CLAUDE.md rule 6.
+  survey: [
+    {id:'spoint',   name:'Survey point',     tool:'item', kind:'spoint',    layer:'survey',    w:4,  h:4,  shape:'spoint', color:'#d81b60'},
+  ],
   hardscape: [
     {id:'fountain', name:"Hurricane's Eye fountain 29\"", tool:'item', kind:'fountain', layer:'hardscape', w:29, h:29, shape:'circle', color:'#4dd0e1', props:{pad:true, padSize:48}},
     {id:'paver12',  name:'Paver 12×12',      tool:'item', kind:'paverunit', layer:'hardscape', w:12, h:12, shape:'rect', color:'#c9a27a'},
@@ -329,6 +340,8 @@ function newState(){
     supply:{gpm:6, psi:50},
     prices:Object.assign({}, DEFAULT_PRICES),
     nextId:1,
+    nextLabel:0,                 // survey label counter; never reused, so labels stay stable across deletes
+    slope:{a:null, b:null},      // the two survey point ids picked in the Survey tab slope tool
   };
 }
 const view = {scale:2, ox:60, oy:60};   // px per inch, screen offset
@@ -385,10 +398,30 @@ const plantSpec = o => PLANTS.find(p=>p.id===o.props.plant) || PLANTS[0];
 const headGpm = o => { const h=headSpec(o); const r=o.props.radius/12; return +(h.gpm360*(o.props.arc/360)*(h.strip?1:Math.pow(r/h.radius,2))).toFixed(2); };
 // Note: GPM scales ~ with area for matched-precip rotators; that is also a fair approximation for radius-reduced sprays.
 
+// ---- Survey / grade helpers. Readings live in mm; plan geometry stays in inches. ----
+// Bijective base-26: 0->A, 25->Z, 26->AA, 27->AB, 701->ZZ, 702->AAA (spreadsheet column order).
+function alphaLabel(n){ let s=''; n=n+1; while(n>0){ n--; s=String.fromCharCode(65+n%26)+s; n=Math.floor(n/26); } return s; }
+function labelIndex(s){ let n=0; for(const ch of String(s).toUpperCase()) n=n*26+(ch.charCodeAt(0)-64); return n-1; }
+const mmToIn = mm => mm/25.4;
+const fmtM   = mm => (mm/1000).toFixed(3)+' m';
+const fmtMNum= mm => (mm/1000).toFixed(3);
+const fmtCm  = (mm, sign=true) => { const v=mm/10; return (sign&&v>0?'+':'')+v.toFixed(1)+' cm'; };
+// Accepts 1.235, 1.235m, 123.5cm, 1235mm (unit defaults to metres). Returns integer mm, or NaN.
+function parseMetric(s){ const m=String(s).trim().toLowerCase().match(/^(-?\d+(?:\.\d+)?)\s*(m|cm|mm)?$/); if(!m) return NaN; const v=parseFloat(m[1]); return Math.round(m[2]==='cm'? v*10 : m[2]==='mm'? v : v*1000); }
+const benchPoint = () => state.objects.find(o=>o.kind==='spoint'&&o.props.bench);
+// Elevation relative to the benchmark. A higher rod reading means lower ground, so delta = bench - reading.
+function deltaMm(o){ const bm=benchPoint(); if(!bm||bm.props.reading==null||o.props.reading==null) return null; return bm.props.reading-o.props.reading; }
+// Slope needs no benchmark: rise between two points is just the difference of their readings.
+function slopeBetween(A,B){ if(A.props.reading==null||B.props.reading==null) return null; const run=dist([A.x,A.y],[B.x,B.y]); if(!run) return null; const riseMm=A.props.reading-B.props.reading; const riseIn=mmToIn(riseMm); return {run, riseMm, riseIn, pct:riseIn/run*100, inPerFt:riseIn/(run/12)}; }
+function surveyLabel(o){ const L=o.props.label; if(o.props.bench) return L+' BM'; if(o.props.reading==null) return L; const d=deltaMm(o); return L+' '+(d==null? fmtM(o.props.reading) : fmtCm(d)); }
+
 // ================= History / persistence =================
-function pushHist(){ ui.hist.push(JSON.stringify(state.objects)); if(ui.hist.length>100) ui.hist.shift(); ui.redo.length=0; }
-function undo(){ if(!ui.hist.length) return; ui.redo.push(JSON.stringify(state.objects)); state.objects=JSON.parse(ui.hist.pop()); ui.selId=null; refresh(); }
-function redo(){ if(!ui.redo.length) return; ui.hist.push(JSON.stringify(state.objects)); state.objects=JSON.parse(ui.redo.pop()); ui.selId=null; refresh(); }
+// Snapshots carry the survey label counter alongside objects so undoing a placement rolls it back.
+const histSnap = () => JSON.stringify({o:state.objects, n:state.nextLabel});
+const histRestore = s => { const j=JSON.parse(s); state.objects=j.o; state.nextLabel=j.n; };
+function pushHist(){ ui.hist.push(histSnap()); if(ui.hist.length>100) ui.hist.shift(); ui.redo.length=0; }
+function undo(){ if(!ui.hist.length) return; ui.redo.push(histSnap()); histRestore(ui.hist.pop()); ui.selId=null; refresh(); }
+function redo(){ if(!ui.redo.length) return; ui.hist.push(histSnap()); histRestore(ui.redo.pop()); ui.selId=null; refresh(); }
 let saveTimer=null;
 function autosave(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{ try{ localStorage.setItem('byd.state', JSON.stringify(state)); $('#stSave').textContent='autosaved '+new Date().toLocaleTimeString(); }catch(e){} },400); }
 function loadAutosave(){ try{ const s=localStorage.getItem('byd.state'); if(s){ const st=JSON.parse(s); migrate(st); state=st; return true; } }catch(e){} return false; }
@@ -397,14 +430,18 @@ function migrate(st){
   st.prices = Object.assign({}, DEFAULT_PRICES, st.prices||{});
   st.supply = st.supply||{gpm:6,psi:50};
   st.objects = st.objects||[]; st.nextId = st.nextId||(st.objects.length+1);
+  st.slope = st.slope||{a:null,b:null};
+  if(st.nextLabel==null){ const idx=st.objects.filter(o=>o.kind==='spoint'&&o.props&&o.props.label).map(o=>labelIndex(o.props.label)); st.nextLabel = idx.length? Math.max(...idx)+1 : 0; }
   st.objects.forEach(o=>{ o.props=o.props||{}; if(o.rot==null) o.rot=0; });
 }
 
 // ================= Object creation =================
 function makePoly(lib, pts){ return {id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: lib.kind==='planter'?{}: {}}; }
 function makePath(lib, pts){ return {id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='trench'?{width:6,depth:18}:{}}; }
-function makeItem(lib, x, y){
+// ghost=true is the cursor preview: it shows the next label without consuming it.
+function makeItem(lib, x, y, ghost){
   const o={id:uid(), type:'item', kind:lib.kind, layer:lib.layer, name:lib.name, x, y, w:lib.w, h:lib.h, rot:0, shape:lib.shape, color:lib.color, props:Object.assign({}, lib.props||{})};
+  if(lib.kind==='spoint'){ const L=alphaLabel(ghost? state.nextLabel : state.nextLabel++); o.props={label:L, reading:null, bench:false, note:''}; o.name='Point '+L; }
   if(lib.kind==='head'){ const h=HEADS[0]; o.props={model:h.id, radius:h.radius*12, arc:180, start:0, zone:1}; o.name=h.brand+' '+h.name; }
   if(lib.kind==='plant'){ const p=PLANTS.find(p=>p.id===lib.props.plant); o.name=p.name.split(' (')[0].split(' —')[0]; }
   return o;
@@ -442,7 +479,7 @@ function hitTest(pw){
 function handleHit(o, pw){ // returns {type:'vertex',i} | {type:'mid',i} | {type:'resize'} | null
   const tol=8/view.scale;
   if(o.type==='item'){
-    if(o.shape==='text') return null;
+    if(o.shape==='text'||o.shape==='spoint') return null;
     const lp=toLocal(o,pw); const b=itemBox(o);
     if(Math.hypot(lp[0]-(b.x+b.w), lp[1]-(b.y+b.h))<=tol) return {type:'resize'};
     if(o.kind==='head' && ui.showArcs){ // radius handle at end of arc bisector
@@ -470,7 +507,7 @@ function draw(){
   ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
   ctx.clearRect(0,0,W,H); ctx.fillStyle='#fafaf7'; ctx.fillRect(0,0,W,H);
   if(ui.showGrid) drawGrid(W,H);
-  const order = ['base','hardscape','trench','plants','irrigation','conduit','lighting','notes'];
+  const order = ['base','hardscape','trench','plants','irrigation','conduit','lighting','notes','survey'];
   const sel = state.objects.find(o=>o.id===ui.selId);
   for(const lid of order){ if(!state.layers[lid]?.visible) continue;
     for(const o of state.objects){ if(o.layer!==lid) continue; drawObj(o, o===sel); } }
@@ -534,11 +571,16 @@ function drawItem(o, selected, st){
   ctx.lineWidth= selected?2.5:1.5; ctx.strokeStyle= selected?'#4fa3ff':'#222';
   if(o.shape==='text'){ ctx.rotate(0); ctx.font=(o.props.size||12)*Math.max(.6,Math.min(3,s/2))+'px system-ui'; ctx.textAlign='left'; ctx.textBaseline='bottom'; ctx.fillStyle=o.color||'#333'; ctx.fillText(o.props.text||'', 0, 0); if(selected){ctx.strokeStyle='#4fa3ff';ctx.strokeRect(-2,-(o.props.size||12)*Math.max(.6,Math.min(3,s/2))-2, ctx.measureText(o.props.text||'').width+4,(o.props.size||12)*Math.max(.6,Math.min(3,s/2))+4);} ctx.restore(); return; }
   if(o.shape==='plant'){ const p=plantSpec(o); ctx.fillStyle=hexA(p?p.color:'#8bc34a',.5); ctx.beginPath(); ctx.ellipse(0,0,w/2,h/2,0,0,7); ctx.fill(); ctx.strokeStyle=selected?'#4fa3ff':'#2e7d32'; ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle='#2e7d32'; ctx.beginPath(); ctx.arc(0,0,3,0,7); ctx.fill(); }
+  else if(o.shape==='spoint'){ // fixed screen size so it stays readable at any zoom
+    const bm=!!o.props.bench; ctx.lineWidth=selected?2.5:2; ctx.strokeStyle=selected?'#4fa3ff':'#880e4f'; ctx.fillStyle=bm?'#fff':'#d81b60';
+    ctx.beginPath(); ctx.arc(0,0,5,0,7); ctx.fill(); ctx.stroke(); if(bm){ ctx.fillStyle='#d81b60'; ctx.beginPath(); ctx.arc(0,0,2.5,0,7); ctx.fill(); } }
   else if(o.shape==='head'){ const zc=zoneColor(o.props.zone); ctx.fillStyle=zc; ctx.beginPath(); ctx.arc(0,0,Math.max(5,w/2),0,7); ctx.fill(); ctx.stroke(); }
   else if(o.shape==='circle'){ ctx.fillStyle=hexA(o.color,.55); ctx.beginPath(); ctx.ellipse(0,0,w/2,h/2,0,0,7); ctx.fill(); ctx.stroke(); if(o.kind==='fountain'){ ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1; for(let r=w/2*.75;r>3;r*=.6){ctx.beginPath();ctx.arc(0,0,r,0,7);ctx.stroke();} } if(o.kind==='tree'){ ctx.strokeStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(0,0,w/2*.5,0,7); ctx.stroke(); } }
   else { ctx.fillStyle=hexA(o.color,.6); ctx.fillRect(-w/2,-h/2,w,h); ctx.strokeRect(-w/2,-h/2,w,h);
     if(o.kind==='gfci'||o.kind==='panel'){ ctx.fillStyle='#000'; ctx.font='bold '+Math.max(8,Math.min(14,h*.6))+'px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(o.kind==='gfci'?'⏚':'P',0,0); } }
   ctx.restore();
+  // Survey labels are the data, not decoration: always drawn, independent of the Dims toggle.
+  if(o.kind==='spoint'){ label(surveyLabel(o), [c[0], c[1]-11], {bold:true, size:11, color:'#880e4f'}); return; }
   if(ui.showDims){ const off=Math.max(o.h*s/2, 8)+9; const nm = o.kind==='head'? (headSpec(o).name.replace('MP Rotator ','').replace(' rotary nozzle','').replace(' spray nozzle','')+' Z'+o.props.zone+' '+(o.props.radius/12)+"' "+o.props.arc+'°') : o.name; label(nm, [c[0], c[1]+off], {size:10, color:'#333'}); if(selected && o.kind!=='head') label(fmtLen(o.w)+' × '+fmtLen(o.h), [c[0], c[1]+off+12], {size:10, color:'#1a3d6b'}); }
 }
 function drawHeadArc(o, selected){
@@ -551,7 +593,7 @@ function hexA(hex,a){ if(!hex||hex[0]!=='#') return hex; const n=parseInt(hex.sl
 function drawHandles(o){
   ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; ctx.lineWidth=1.5;
   if(o.type==='item'){
-    if(o.shape==='text') return;
+    if(o.shape==='text'||o.shape==='spoint') return;
     const c=w2s([o.x,o.y]); ctx.save(); ctx.translate(c[0],c[1]); ctx.rotate(o.rot*Math.PI/180); const w=o.w*view.scale,h=o.h*view.scale; ctx.fillRect(w/2-4,h/2-4,8,8); ctx.strokeRect(w/2-4,h/2-4,8,8); ctx.restore();
     if(o.kind==='head'&&ui.showArcs){ const draw=(ang,rad,fill)=>{const x=c[0]+Math.cos(ang)*rad,y=c[1]+Math.sin(ang)*rad; ctx.fillStyle=fill; ctx.beginPath(); ctx.arc(x,y,5,0,7); ctx.fill(); ctx.stroke();};
       draw((o.props.start+o.props.arc/2)*Math.PI/180, o.props.radius*view.scale, '#fff'); draw(o.props.start*Math.PI/180, o.props.radius*view.scale*.6, '#ffb347'); draw((o.props.start+o.props.arc)*Math.PI/180, o.props.radius*view.scale*.6, '#ffb347'); }
@@ -563,7 +605,7 @@ function drawHandles(o){
   sp.forEach(p=>{ ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p[0],p[1],5,0,7); ctx.fill(); ctx.stroke(); });
 }
 function drawDrawing(){
-  if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1])); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
+  if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1]), true); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
   const pts = ui.drawPts.concat(ui.mouseW? [[snap(ui.mouseW[0]),snap(ui.mouseW[1])]] : []);
   const sp=pts.map(w2s); const st=KIND_STYLE[ui.lib.kind]||{stroke:'#333'};
   ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
@@ -601,9 +643,9 @@ function setTool(id, lib){ ui.tool=id; ui.lib=lib||null; ui.drawPts=[]; ui.measu
 function buildLeft(){
   $('#toolBtns').innerHTML = TOOLS.map(t=>`<button data-id="${t.id}">${t.name}</button>`).join('');
   $('#toolBtns').querySelectorAll('button').forEach(b=> b.onclick=()=>setTool(b.dataset.id));
-  const groups={areas:'#libAreas',runs:'#libRuns',irrigation:'#libIrrigation',electrical:'#libElectrical',lighting:'#libLighting',hardscape:'#libHardscape',plants:'#libPlants'};
+  const groups={areas:'#libAreas',runs:'#libRuns',survey:'#libSurvey',irrigation:'#libIrrigation',electrical:'#libElectrical',lighting:'#libLighting',hardscape:'#libHardscape',plants:'#libPlants'};
   for(const [g,sel] of Object.entries(groups)){
-    $(sel).innerHTML = LIB[g].map(e=>`<div class="libitem" data-id="${e.id}" title="${esc(e.name)}"><span class="sw ${e.shape==='circle'||e.shape==='plant'?'circle':''}" style="background:${e.color}"></span><span>${e.name}</span>${e.w?`<span class="dim">${e.kind==='plant'?fmtLen(e.w)+' spread':fmtLen(e.w)+'×'+fmtLen(e.h)}</span>`:''}</div>`).join('');
+    $(sel).innerHTML = LIB[g].map(e=>`<div class="libitem" data-id="${e.id}" title="${esc(e.name)}"><span class="sw ${e.shape==='circle'||e.shape==='plant'?'circle':''}" style="background:${e.color}"></span><span>${e.name}</span>${e.w&&e.kind!=='spoint'?`<span class="dim">${e.kind==='plant'?fmtLen(e.w)+' spread':fmtLen(e.w)+'×'+fmtLen(e.h)}</span>`:''}</div>`).join('');
     $(sel).querySelectorAll('.libitem').forEach(d=> d.onclick=()=>{ const e=libById(d.dataset.id); setTool(e.tool==='item'?'place':'draw', e); });
   }
   document.querySelectorAll('.sec h3').forEach(h=> h.onclick=()=>h.parentElement.classList.toggle('closed'));
@@ -690,12 +732,14 @@ window.addEventListener('keydown', e=>{
 });
 window.addEventListener('keyup', e=>{ if(e.code==='Space') ui.space=false; });
 function moveObj(o,dx,dy){ if(o.type==='item'){o.x+=dx;o.y+=dy;} else o.pts=o.pts.map(p=>[p[0]+dx,p[1]+dy]); }
-function duplicateSel(){ const sel=state.objects.find(o=>o.id===ui.selId); if(!sel) return; pushHist(); const c=JSON.parse(JSON.stringify(sel)); c.id=uid(); moveObj(c,12,12); state.objects.push(c); ui.selId=c.id; refresh(); }
+function duplicateSel(){ const sel=state.objects.find(o=>o.id===ui.selId); if(!sel) return; pushHist(); const c=JSON.parse(JSON.stringify(sel)); c.id=uid();
+  if(c.kind==='spoint'){ c.props.label=alphaLabel(state.nextLabel++); c.props.bench=false; c.name='Point '+c.props.label; } // a copy is a new reading, never a duplicate label
+  moveObj(c,12,12); state.objects.push(c); ui.selId=c.id; refresh(); }
 function toggleBtn(id,prop){ ui[prop]=!ui[prop]; $('#'+id).classList.toggle('active',ui[prop]); draw(); }
 function fitView(){ const b=allBounds(); const W=canvas.width/devicePixelRatio, H=canvas.height/devicePixelRatio; if(!b){ view.scale=2; view.ox=60; view.oy=60; draw(); return; } const w=b.x1-b.x0+48, h=b.y1-b.y0+48; view.scale=Math.min(40,Math.max(0.15,Math.min(W/w,H/h))); view.ox=(W-(b.x0+b.x1)*view.scale)/2; view.oy=(H-(b.y0+b.y1)*view.scale)/2; draw(); }
 
 // ================= Right panel =================
-function refresh(){ draw(); renderProps(); renderLayers(); renderZones(); renderBom(); autosave(); }
+function refresh(){ draw(); renderProps(); renderLayers(); renderZones(); renderBom(); renderSurvey(); autosave(); }
 document.querySelectorAll('#tabs button').forEach(b=> b.onclick=()=>{ document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('active',x===b)); document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id==='tab-'+b.dataset.tab)); });
 function field(label, inputHtml){ return `<div class="row"><label>${label}</label>${inputHtml}</div>`; }
 function renderProps(){
@@ -706,7 +750,17 @@ function renderProps(){
   h+=field('Layer', `<select data-p="layer">${LAYERS.map(l=>`<option value="${l.id}" ${l.id===o.layer?'selected':''}>${l.name}</option>`).join('')}</select>`);
   if(o.type==='item'){
     h+=field('Center X', `<input data-len="x" value="${fmtLen(o.x)}">`)+field('Center Y', `<input data-len="y" value="${fmtLen(o.y)}">`);
-    if(o.shape!=='text'&&o.kind!=='head'){ h+=field('Width', `<input data-len="w" value="${fmtLen(o.w)}">`); h+=field('Height/Depth', `<input data-len="h" value="${fmtLen(o.h)}">`); h+=field('Rotation °', `<input type="number" data-num="rot" value="${o.rot}" step="5">`); }
+    if(o.kind==='spoint'){ const bm=benchPoint(); const d=deltaMm(o);
+      h+=field('Label', `<input value="${o.props.label}" disabled>`);
+      h+=field('Reading', `<input data-mprop="reading" value="${o.props.reading==null?'':fmtMNum(o.props.reading)}" placeholder="1.235"> <span class="muted" style="font-size:11px;white-space:nowrap">m</span>`);
+      h+=field('Benchmark', `<input type="checkbox" data-bench ${o.props.bench?'checked':''}>`);
+      h+=field('Note', `<input data-prop="note" value="${esc(o.props.note||'')}">`);
+      if(o.props.reading==null) h+=`<div class="note">Rod reading in metres. 1.235, 1.235m, 123.5cm and 1235mm all work.</div>`;
+      else if(o.props.bench) h+=`<div class="note">Benchmark. Every other point shows its height relative to this one.</div>`;
+      else if(d==null) h+=`<div class="note">Tick Benchmark on one point to see relative elevation.</div>`;
+      else h+=`<div class="note">Δ from ${bm.props.label}: <b>${fmtCm(d)}</b> · ${fmtLen(mmToIn(d))} ${d<0?'lower':d>0?'higher':'level'}</div>`;
+    }
+    if(o.shape!=='text'&&o.kind!=='head'&&o.kind!=='spoint'){ h+=field('Width', `<input data-len="w" value="${fmtLen(o.w)}">`); h+=field('Height/Depth', `<input data-len="h" value="${fmtLen(o.h)}">`); h+=field('Rotation °', `<input type="number" data-num="rot" value="${o.rot}" step="5">`); }
     if(o.kind==='head'){ const hs=headSpec(o);
       h+=field('Model', `<select data-prop="model">${HEADS.map(x=>`<option value="${x.id}" ${x.id===hs.id?'selected':''}>#${x.rank} ${x.brand} ${x.name}</option>`).join('')}</select>`);
       h+=field('Radius', `<input data-lenprop="radius" value="${fmtLen(o.props.radius)}"> <span class="muted" style="font-size:11px;white-space:nowrap">${hs.rmin}–${hs.rmax} ft</span>`);
@@ -732,7 +786,7 @@ function renderProps(){
     }
     h+=`<div class="note">Vertices (ft-in):</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td></tr>`).join('')}</table>`;
   }
-  h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
+  h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'&&o.kind!=='spoint'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
   el.innerHTML=h;
   const commit=()=>{ refresh(); };
   el.querySelectorAll('[data-p]').forEach(i=> i.onchange=()=>{ pushHist(); o[i.dataset.p]=i.value; commit(); });
@@ -744,6 +798,8 @@ function renderProps(){
     o.props[i.dataset.numprop]=Math.min(mx,Math.max(mn,v)); commit(); });
   el.querySelectorAll('[data-lenprop]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); o.props[i.dataset.lenprop]=v; if(i.dataset.lenprop==='radius'){ const hs=headSpec(o); o.props.radius=Math.min(hs.rmax*12,Math.max(hs.rmin*12,v)); } commit(); });
   el.querySelectorAll('[data-boolprop]').forEach(i=> i.onchange=()=>{ pushHist(); o.props[i.dataset.boolprop]=i.checked; commit(); });
+  el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtMNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
+  el.querySelectorAll('[data-bench]').forEach(i=> i.onchange=()=>{ pushHist(); state.objects.forEach(x=>{ if(x.kind==='spoint') x.props.bench=false; }); o.props.bench=i.checked; commit(); }); // exactly one benchmark
   el.querySelectorAll('[data-arc]').forEach(b=> b.onclick=()=>{ pushHist(); o.props.arc=+b.dataset.arc; commit(); });
   el.querySelectorAll('[data-vx],[data-vy]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); const k=i.dataset.vx!=null?0:1; const idx=+(i.dataset.vx??i.dataset.vy); o.pts[idx][k]=v; commit(); });
   $('#pDup').onclick=duplicateSel; $('#pDel').onclick=()=>{ pushHist(); state.objects=state.objects.filter(x=>x!==o); ui.selId=null; refresh(); };
@@ -827,6 +883,33 @@ function renderBom(){
   h+='</table>'+`<h4>Total</h4><div style="font-size:16px"><b>$${total.toFixed(2)}</b></div><div class="note">Prices are editable placeholders and save with the design. Items sharing a key share a price.</div>`;
   el.innerHTML=h; el.querySelectorAll('[data-price]').forEach(i=> i.onchange=()=>{ state.prices[i.dataset.price]=parseFloat(i.value)||0; renderBom(); autosave(); });
 }
+// ================= Survey tab =================
+function surveyPoints(){ return state.objects.filter(o=>o.kind==='spoint').sort((a,b)=>labelIndex(a.props.label)-labelIndex(b.props.label)); }
+function renderSurvey(){
+  const el=$('#tab-survey'); const pts=surveyPoints();
+  if(!pts.length){ el.innerHTML='<div class="note">No survey points yet. Survey / grade → Survey point, then click where you read the rod. Points are labelled A, B, C … Z, AA, AB … and keep their label if you delete another. Enter each reading in Properties and tick Benchmark on one point.</div>'; return; }
+  const bm=benchPoint();
+  let h=bm? `<div class="note">Benchmark <b>${bm.props.label}</b>${bm.props.reading!=null?' · reading '+fmtM(bm.props.reading):' <span class="warn">(no reading yet)</span>'}. Δ = benchmark reading − point reading, so positive is higher ground.</div>`
+          : '<div class="note"><span class="warn">No benchmark.</span> Tick Benchmark on one point in Properties to get relative elevations.</div>';
+  h+='<table><tr><th>Pt</th><th class="n">Reading</th><th class="n">Δ cm</th><th class="n">Δ in</th><th>Note</th></tr>';
+  pts.forEach(o=>{ const d=deltaMm(o); h+=`<tr><td><b>${o.props.label}</b>${o.props.bench?' <span class="muted">BM</span>':''}</td><td class="n">${o.props.reading==null?'<span class="muted">—</span>':fmtM(o.props.reading)}</td><td class="n">${d==null?'':fmtCm(d)}</td><td class="n">${d==null?'':fmtLen(mmToIn(d))}</td><td class="muted">${esc(o.props.note||'')}</td></tr>`; });
+  h+='</table>';
+  const withD=pts.filter(o=>deltaMm(o)!=null);
+  if(withD.length>1){ const hi=withD.reduce((a,b)=>deltaMm(b)>deltaMm(a)?b:a), lo=withD.reduce((a,b)=>deltaMm(b)<deltaMm(a)?b:a); const fall=deltaMm(hi)-deltaMm(lo);
+    h+=`<div class="note">Highest <b>${hi.props.label}</b> (${fmtCm(deltaMm(hi))}) · lowest <b>${lo.props.label}</b> (${fmtCm(deltaMm(lo))}) · total fall <b>${fmtCm(fall,false)}</b> / ${fmtLen(mmToIn(fall))}</div>`; }
+  const opt=sel=>'<option value="">—</option>'+pts.map(o=>`<option value="${o.id}" ${o.id===sel?'selected':''}>${o.props.label}</option>`).join('');
+  h+=`<h4>Slope</h4><div class="row"><label>From</label><select data-slope="a">${opt(state.slope.a)}</select><label style="width:auto">to</label><select data-slope="b">${opt(state.slope.b)}</select></div>`;
+  const A=pts.find(o=>o.id===state.slope.a), B=pts.find(o=>o.id===state.slope.b);
+  if(A&&B&&A!==B){ const s=slopeBetween(A,B);
+    if(!s) h+='<div class="note">Both points need a reading.</div>';
+    else h+=`<div class="note">Run <b>${fmtLen(s.run)}</b> · rise <b>${fmtCm(s.riseMm)}</b> / ${fmtLen(s.riseIn)} · slope <b>${s.pct.toFixed(2)}%</b> · <b>${s.inPerFt.toFixed(2)} in/ft</b> — ${s.riseMm<0?'falls':s.riseMm>0?'rises':'level'} from ${A.props.label} to ${B.props.label}<br><span class="muted">Drainage rule of thumb: ≥2% (¼ in/ft) away from the house for the first 10 ft.</span></div>`; }
+  h+='<div class="btnrow"><button id="btnSurveyCsv">Survey CSV</button></div>';
+  el.innerHTML=h;
+  el.querySelectorAll('[data-slope]').forEach(s=> s.onchange=()=>{ state.slope[s.dataset.slope]=s.value||null; renderSurvey(); autosave(); });
+  $('#btnSurveyCsv').onclick=()=>download('survey.csv', surveyCsvText(), 'text/csv');
+}
+function surveyCsvText(){ let s='Point,Reading_m,Delta_cm,Delta_in,X_ft,Y_ft,Benchmark,Note\n'; surveyPoints().forEach(o=>{ const d=deltaMm(o); s+=[o.props.label, o.props.reading==null?'':(o.props.reading/1000).toFixed(3), d==null?'':(d/10).toFixed(1), d==null?'':mmToIn(d).toFixed(2), (o.x/12).toFixed(2), (o.y/12).toFixed(2), o.props.bench?'yes':'', o.props.note||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); return s; }
+
 function bomCsv(){ const rows=computeBom(); let s='Category,Item,Qty,Unit,UnitPrice,Ext,Note\n'; rows.forEach(r=>{ const p=state.prices[r.key]??0; s+=[r.cat,r.item,r.qty,r.unit,p,(p*r.qty).toFixed(2),r.note].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); download('backyard-bom.csv', s, 'text/csv'); }
 
 // ================= IO =================

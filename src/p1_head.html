@@ -49,7 +49,7 @@ input[type=range]{padding:0}
 .libitem .dim{margin-left:auto;color:var(--muted);font-size:11px}
 .libitem.active .dim{color:#04182e}
 #tabs{display:flex;border-bottom:1px solid var(--line)}
-#tabs button{flex:1;border-radius:0;border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 4px}
+#tabs button{flex:1;border-radius:0;border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 2px;font-size:12px}
 #tabs button.active{background:transparent;color:var(--acc);border-bottom-color:var(--acc)}
 .tab{display:none;overflow-y:auto;padding:10px;flex:1;min-height:0}
 .tab.active{display:block}
@@ -109,6 +109,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
     <div class="sec"><h3>Tools</h3><div class="body tools" id="toolBtns"></div></div>
     <div class="sec"><h3>Draw areas</h3><div class="body" id="libAreas"></div></div>
     <div class="sec"><h3>Runs (lines)</h3><div class="body" id="libRuns"></div></div>
+    <div class="sec"><h3>Survey / grade</h3><div class="body" id="libSurvey"></div></div>
     <div class="sec"><h3>Irrigation</h3><div class="body" id="libIrrigation"></div></div>
     <div class="sec"><h3>Electrical / conduit</h3><div class="body" id="libElectrical"></div></div>
     <div class="sec"><h3>Lighting</h3><div class="body" id="libLighting"></div></div>
@@ -126,12 +127,14 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
       <button data-tab="layers">Layers</button>
       <button data-tab="zones">Zones</button>
       <button data-tab="bom">BOM</button>
+      <button data-tab="survey">Survey</button>
       <button data-tab="help">Help</button>
     </div>
     <div class="tab active" id="tab-props"></div>
     <div class="tab" id="tab-layers"></div>
     <div class="tab" id="tab-zones"></div>
     <div class="tab" id="tab-bom"></div>
+    <div class="tab" id="tab-survey"></div>
     <div class="tab" id="tab-help">
       <h4>Workflow</h4>
       <div class="note">1. Draw the yard outline first (Draw areas → Yard). Click grid points; click the first point or press Enter to close. Every edge is dimensioned automatically and updates when you drag a vertex.</div>
@@ -145,6 +148,8 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
       <div class="note"><kbd>V</kbd> select <kbd>H</kbd> pan <kbd>M</kbd> measure <kbd>Enter</kbd> finish <kbd>Esc</kbd> cancel <kbd>Del</kbd> delete <kbd>R</kbd> rotate 15° (<kbd>Shift</kbd>+<kbd>R</kbd> 90°) <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo <kbd>G</kbd> grid <kbd>S</kbd> snap <kbd>D</kbd> dims <kbd>F</kbd> fit <kbd>arrows</kbd> nudge 6"</div>
       <h4>Lengths</h4>
       <div class="note">Type lengths as <code>12'6"</code>, <code>12' 6</code>, <code>12.5</code> (feet), or <code>150in</code>.</div>
+      <h4>Survey / grade</h4>
+      <div class="note">Set the level up once, then read the grade rod at each spot. Survey / grade → Survey point, click to place. Points are labelled A, B, C … Z, AA, AB … and never renumber when one is deleted, so they match your notebook. Enter each reading in Properties (metres — 1.235, 123.5cm, 1235mm all work). Tick Benchmark on one point; every other point then shows its height relative to it in cm and inches. Higher reading = lower ground. The Survey tab lists all points, finds the high and low, and gives slope between any two as % and in/ft.</div>
       <h4>Data notes</h4>
       <div class="note">Head radius/GPM figures are manufacturer nominal values at the listed pressure; GPM scales with arc. Verify against the nozzle chart for your actual pressure. Orbit 50020 kit requires ≥50 PSI and ≥5 GPM at the hose bib.</div>
       <div class="note">Conduit rules of thumb (NEC): ≤360° of bends between pull points; PVC branch circuits buried 18" to top of conduit (12" if GFCI-protected 20A or less, 120V — check local code).</div>

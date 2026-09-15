@@ -110,6 +110,74 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   assert(!keys.includes(undefined), 'every BOM row has a price key');
   assert(bom.every(r => r.qty > 0), 'no zero-quantity rows');
 
+  console.log('\n--- survey: labels ---');
+  eq(await page.evaluate(() => [0, 1, 25, 26, 27, 51, 52, 701, 702].map(alphaLabel)), ['A', 'B', 'Z', 'AA', 'AB', 'AZ', 'BA', 'ZZ', 'AAA'], 'alphaLabel is spreadsheet-column order');
+  eq(await page.evaluate(() => ['A', 'Z', 'AA', 'ZZ', 'AAA'].map(labelIndex)), [0, 25, 26, 701, 702], 'labelIndex inverts alphaLabel');
+  const labels =() => page.evaluate(() => state.objects.filter(o => o.kind === 'spoint').map(o => o.props.label));
+  await click('spoint'); await cw(10 * 12, 10 * 12); await cw(20 * 12, 10 * 12); await cw(30 * 12, 10 * 12); await page.keyboard.press('Escape');
+  eq(await labels(), ['A', 'B', 'C'], 'three placed points are A, B, C');
+  await page.evaluate(() => { const b = state.objects.find(o => o.kind === 'spoint' && o.props.label === 'B'); pushHist(); state.objects = state.objects.filter(o => o !== b); refresh(); });
+  await click('spoint'); await cw(40 * 12, 10 * 12); await page.keyboard.press('Escape');
+  eq(await labels(), ['A', 'C', 'D'], 'labels are stable: after deleting B the next point is D, not B');
+  await click('spoint'); await cw(10 * 12, 20 * 12); await page.keyboard.press('Escape');
+  eq((await labels()).pop(), 'E', 'placed E');
+  await page.keyboard.press('Control+z');
+  await click('spoint'); await cw(10 * 12, 20 * 12); await page.keyboard.press('Escape');
+  eq((await labels()).pop(), 'E', 'undo rolls the label counter back: E again, not F');
+  await page.evaluate(() => { ui.selId = state.objects.find(o => o.kind === 'spoint' && o.props.label === 'E').id; duplicateSel(); });
+  eq((await labels()).pop(), 'F', 'Ctrl+D gives the copy a fresh label');
+  await page.evaluate(() => { pushHist(); state.objects = state.objects.filter(o => !(o.kind === 'spoint' && (o.props.label === 'E' || o.props.label === 'F'))); refresh(); });
+
+  console.log('\n--- survey: readings, benchmark, both units ---');
+  const sv = await page.evaluate(() => {
+    const P = l => state.objects.find(o => o.kind === 'spoint' && o.props.label === l);
+    P('A').props.reading = parseMetric('1.000'); P('A').props.bench = true;
+    P('C').props.reading = parseMetric('1.124');   // 12.4 cm lower than A
+    P('D').props.reading = parseMetric('95cm');    // 5 cm higher than A
+    refresh();
+    return {
+      parsed: [parseMetric('1.235'), parseMetric('1.235m'), parseMetric('123.5cm'), parseMetric('1235mm'), parseMetric('abc')],
+      deltas: [deltaMm(P('A')), deltaMm(P('C')), deltaMm(P('D'))],
+      cm: fmtCm(deltaMm(P('C'))), inch: fmtLen(mmToIn(deltaMm(P('C')))), up: fmtCm(deltaMm(P('D'))),
+      canvasLabel: surveyLabel(P('C')), bmLabel: surveyLabel(P('A')),
+      tab: document.querySelector('#tab-survey').innerText,
+      layers: document.querySelector('#tab-layers').innerText,
+    };
+  });
+  eq(sv.parsed.slice(0, 4), [1235, 1235, 1235, 1235], 'parseMetric accepts m, cm, mm');
+  assert(Number.isNaN(sv.parsed[4]), 'parseMetric rejects garbage');
+  eq(sv.deltas, [0, -124, 50], 'delta from benchmark: bench = 0, higher rod reading = lower ground');
+  eq(sv.cm, '-12.4 cm', 'delta in cm');
+  eq(sv.inch, '-5"', 'delta in inches (quarter-inch rounding)');
+  eq(sv.up, '+5.0 cm', 'positive delta carries a + sign');
+  eq(sv.canvasLabel, 'C -12.4 cm', 'canvas label shows point + delta');
+  eq(sv.bmLabel, 'A BM', 'benchmark canvas label');
+  assert(/Benchmark A/.test(sv.tab) && /-12\.4 cm/.test(sv.tab) && /-5"/.test(sv.tab) && /\+5\.0 cm/.test(sv.tab), 'survey tab lists deltas in both metric and inches');
+  assert(/Highest D/.test(sv.tab) && /lowest C/.test(sv.tab) && /total fall 17\.4 cm/.test(sv.tab), 'survey tab finds high, low and total fall');
+  assert(/Survey \/ grade/.test(sv.layers), 'survey layer appears in Layers tab');
+
+  console.log('\n--- survey: slope ---');
+  const sl = await page.evaluate(() => {
+    const P = l => state.objects.find(o => o.kind === 'spoint' && o.props.label === l);
+    const s = slopeBetween(P('A'), P('C'));
+    state.slope = { a: P('A').id, b: P('C').id }; renderSurvey();
+    return { run: s.run, riseMm: s.riseMm, pct: +s.pct.toFixed(2), ipf: +s.inPerFt.toFixed(2), tab: document.querySelector('#tab-survey').innerText };
+  });
+  eq([sl.run, sl.riseMm], [240, -124], 'slope A→C: run 20 ft, rise −124 mm');
+  eq(sl.pct, -2.03, 'slope percent');
+  eq(sl.ipf, -0.24, 'slope in/ft');
+  assert(/-2\.03%/.test(sl.tab) && /-0\.24 in\/ft/.test(sl.tab) && /falls from A to C/.test(sl.tab), 'slope shown in the Survey tab in both units with direction');
+
+  console.log('\n--- survey: benchmark exclusivity, CSV, migrate ---');
+  await page.evaluate(() => { ui.selId = state.objects.find(o => o.kind === 'spoint' && o.props.label === 'C').id; refresh(); const i = document.querySelector('[data-bench]'); i.checked = true; i.dispatchEvent(new Event('change')); });
+  eq(await page.evaluate(() => state.objects.filter(o => o.kind === 'spoint' && o.props.bench).map(o => o.props.label)), ['C'], 'ticking Benchmark on C clears it on A');
+  const csv = await page.evaluate(() => surveyCsvText());
+  assert(/^Point,Reading_m,Delta_cm,Delta_in/.test(csv) && csv.trim().split('\n').length === 4, 'survey CSV has header + one row per point');
+  assert(/"A","1\.000"/.test(csv) && /"C","1\.124","0\.0","0\.00"/.test(csv), 'CSV rows carry reading and delta');
+  const mig = await page.evaluate(() => { const st = JSON.parse(JSON.stringify(state)); delete st.nextLabel; delete st.slope; migrate(st); return [st.nextLabel, JSON.stringify(st.slope)]; });
+  eq(mig, [4, '{"a":null,"b":null}'], 'migrate derives nextLabel = max surviving label + 1 (A,C,D → 4) and defaults slope');
+  await page.evaluate(() => { ui.selId = null; refresh(); });
+
   console.log('\n--- JSON round-trip ---');
   const n1 = await page.evaluate(() => state.objects.length);
   const json = await page.evaluate(() => JSON.stringify(state));

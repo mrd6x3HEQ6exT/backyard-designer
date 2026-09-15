@@ -1,6 +1,6 @@
 <script>
 'use strict';
-const BUILD_ID = '2026.09.08.3';
+const BUILD_ID = '2026.09.14.1';
 const GRID = 6;           // inches
 const FT = 12;
 
@@ -14,6 +14,7 @@ const LAYERS = [
   {id:'plants',     name:'Plants',                         color:'#43a047'},
   {id:'trench',     name:'Trench / dig plan',              color:'#6d4c41'},
   {id:'notes',      name:'Notes / labels',                 color:'#555555'},
+  {id:'survey',     name:'Survey / grade',                 color:'#d81b60'},
 ];
 
 // ---------- Sprinkler head database, ranked best -> worst for a small hose-bib-fed lawn ----------
@@ -105,6 +106,11 @@ const LIB = {
     {id:'well',     name:'Well light (in-ground)',tool:'item',kind:'well', layer:'lighting', w:4,  h:4,  shape:'circle', color:'#7b1fa2', props:{watts:5}},
     {id:'wall',     name:'Wall wash / step light',tool:'item',kind:'walllight',layer:'lighting',w:6,h:2, shape:'rect',   color:'#8e24aa', props:{watts:3}},
     {id:'string',   name:'String light post',tool:'item', kind:'stringpost',layer:'lighting',w:4,h:4, shape:'circle', color:'#ce93d8', props:{watts:0}},
+  ],
+  // Survey points are the one metric thing in the app: rod readings are stored in mm (props.reading),
+  // because the grade rod is metric. Plan geometry stays in inches. See CLAUDE.md rule 6.
+  survey: [
+    {id:'spoint',   name:'Survey point',     tool:'item', kind:'spoint',    layer:'survey',    w:4,  h:4,  shape:'spoint', color:'#d81b60'},
   ],
   hardscape: [
     {id:'fountain', name:"Hurricane's Eye fountain 29\"", tool:'item', kind:'fountain', layer:'hardscape', w:29, h:29, shape:'circle', color:'#4dd0e1', props:{pad:true, padSize:48}},
