@@ -1,6 +1,6 @@
 # Backyard Designer — project handoff for Claude Code
 
-Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.14.2`.
+Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.14.3`.
 
 ## Working rules (non-negotiable)
 
@@ -21,10 +21,11 @@ src/p1_head.html    HTML skeleton + all CSS + Help tab text
 src/p2_data.js      constants, BUILD_ID, LAYERS, HEADS (sprinkler DB), PLANTS, LIB (object library), KIND_STYLE, PAVER_SIZES, ZONE_COLORS, DEFAULT_PRICES
 src/p3_engine.js    state, view, helpers (fmtLen/parseLen/geometry), history+autosave, object factories, hit-testing, all canvas rendering, conduitFittings()
 src/p4_ui.js        left panel builder, mouse/keyboard handlers, right-panel tabs (Properties/Layers/Zones/BOM), computeBom(), import/export/PNG, init
-test/smoke.js       Playwright end-to-end suite, 71 assertions (scene build, hit-test precedence,
+test/smoke.js       Playwright end-to-end suite, 94 assertions (scene build, hit-test precedence,
                     undo hygiene, vertex drag, conduit fittings, parseLen, zone clamp, PSI warning,
                     BOM escaping, survey labels/deltas/slope/CSV/migrate, typed lengths / ortho /
-                    closing gap / edge edit / units toggle, JSON round-trip, PNG export).
+                    closing gap / edge edit / units toggle, undo-while-drawing, smooth curves,
+                    circle/rectangle modes, walking-path BOM, JSON round-trip, PNG export).
                     Exits non-zero on failure.
 test/syntax.js      Browserless build-integrity + parse check. Exits non-zero on failure.
 mistake.md          self-check log (see rule 3)
@@ -55,7 +56,8 @@ CI: `.github/workflows/ci.yml` runs the syntax check, then the smoke test, on ev
 
 **Objects** — three types, all with `id, type, kind, layer, name, rot, props`:
 - `poly`: `pts:[[x,y],...]` closed area. kinds: yard, house, patio, lawn, paver, rock, mulch, planter, area.
-- `path`: `pts` open polyline. kinds: fence, pipe (½" poly/Blu-Lock), drip (¼"), drip12 (½" drip/fountain fill), conduit (Cantex ¾"), wire (LV), trench.
+- `path`: `pts` open polyline. kinds: fence, pipe (½" poly/Blu-Lock), drip (¼"), drip12 (½" drip/fountain fill), conduit (Cantex ¾"), wire (LV), trench, **walkrock / walkpaver / walkstep** (wide walking paths: `props.width`, plus depth / paver / spacing).
+- Any poly or path may carry `props.smooth:true` — see Curves below.
 - `item`: `x,y` center, `w,h`, `shape` (rect|circle|head|plant|text|spoint), `color`. kinds: head, hosebib, timer, manifold, backflow, filter, floatvalve, valvebox, panel, gfci, jbox, lb, transformer, pathlight, spot, well, walllight, stringpost, fountain, paverunit, boulder, firepit, raisedbed, furniture, shed, fixed, gate, tree, shrub, label, plant, spoint.
 
 Only one `yard` poly is allowed (drawing a new one replaces it; it is `unshift`ed so it renders underneath).
@@ -63,6 +65,12 @@ Only one `yard` poly is allowed (drawing a new one replaces it; it is `unshift`e
 **View**: `view = {scale (px/in), ox, oy}`; `w2s`/`s2w` convert. Wheel zooms about cursor; middle/right/Space-drag pans. Render order is by layer: base, hardscape, trench, plants, irrigation, conduit, lighting, notes, survey; sprinkler arcs are drawn last on top.
 
 **UI state** `ui`: `tool` ∈ select|pan|measure|draw|place, `lib` = active library entry, `drawPts`, `selId`, `drag` ({type: move|vertex|resize|radius|arcstart|arcend}), toggles `showGrid/snap/showDims/showArcs`.
+
+**Curves (2026.09.14.3)**: `o.pts` are always the *control points*. Everything geometric goes through `geomPts(o)` — `curvePts(pts, closed)` (uniform Catmull-Rom, `CURVE_SEG=8` samples per span, closed shapes wrap, open ones clamp) when `isSmooth(o)`, else `o.pts`. Use `objArea / objLen / objPerim`, never `polyArea(o.pts)` on an object. Hit-testing, bounds, fills, strokes, labels and every BOM line read the curve; vertex/midpoint handles, drag, the Edges table and `conduitFittings` stay on control points (Edges is hidden for smooth shapes; conduit refuses smooth). `curveSpans(o)` gives per-span curved lengths for dimension labels.
+
+**Shape switch** (`ui.areaShape`: poly | rect | circle, buttons in Draw areas): rect = two clicks or one click + typed `W x H` (`rectPts`); circle = centre click + radius click or typed radius (`circlePts`, 8 points, `{smooth:true}`). `CIRCLE_K` (computed once from the curve) pushes the 8 control points ~0.5% outside the nominal radius so the *drawn* curve has the true radius — area within 0.01% of πr². Both finish through `commitShape → finishDraw(null, extra)`.
+
+**Walking paths** (`WALK_KINDS`): rendered by `drawWalkPath` — an edge stroke, then a stroke in a 16-px screen-space `CanvasPattern` (`walkPattern`), then for walkstep a paver every `props.spacing` along the curve rotated to the tangent (`stoneCount` = floor((L − s/2)/s)+1). Hit-test uses the real half-width. BOM: area = `objLen × width`; rock by the ton at `props.depth`; pavers with 5% waste; `paverBase()` adds 4" gravel + 1" sand (also now applied to paver *areas*); edging = 2 × length.
 
 **Snap**: `snap(v)` rounds to 6" when on, else 0.5". Clicked points go through it. **Typed lengths do not** — a side entered as 30.17 lands at exactly 362.04" (`r2()` rounds to 1/100"), and stays there until the vertex is dragged.
 
@@ -111,7 +119,7 @@ Per run: length; sticks = `ceil(len×1.05 / 120)`; couplings = sticks−1; bends
 ### Survey / grade (`spoint` items, layer `survey`)
 Elevation survey with a level and a metric grade rod. Added 2026.09.14.1.
 - **Labels**: `alphaLabel(n)` is bijective base-26 — 0→A, 25→Z, 26→AA, 701→ZZ, 702→AAA (spreadsheet columns). `labelIndex` inverts it. Assigned from `state.nextLabel` at placement and **never reused**: delete B and the next point is D. Duplicate (Ctrl+D) takes a fresh label. The cursor ghost previews the next label without consuming it (`makeItem(lib,x,y,ghost=true)`). Undo rolls the counter back because it is in the history snapshot. `migrate` derives `nextLabel` = max surviving label + 1 for files that predate it.
-- **Props**: `{label, reading (mm|null), bench (bool), note}`. `parseMetric` accepts `1.235`, `1.235m`, `123.5cm`, `1235mm` → integer mm. Displayed with `fmtM` (m, 3 dp), `fmtCm` (signed, 1 dp), and `fmtLen(mmToIn(mm))` for the inch column.
+- **Props**: `{label, reading (mm|null), bench (bool), note}`. `parseMetric` accepts `123.5` (**bare = cm**, since 2026.09.14.3), `123.5cm`, `1.235m`, `1235mm` → integer mm. Displayed with `fmtReading` (cm, 1 dp), `fmtCm` (signed Δ, 1 dp), and `fmtLen(mmToIn(mm))` for the inch column. CSV column is `Reading_cm`.
 - **Benchmark**: exactly one point (`[data-bench]` handler clears the others). `deltaMm(o) = bench.reading − o.reading` — a higher rod reading is lower ground, so positive Δ is higher. Null when either reading is missing.
 - **Slope**: `slopeBetween(A,B)` needs no benchmark; rise = `A.reading − B.reading`, run = plan distance in inches. Returns `{run, riseMm, riseIn, pct, inPerFt}`. Survey tab has From/To selects persisted in `state.slope`, and prints the 2 % / ¼ in/ft drainage rule of thumb.
 - **Canvas**: fixed 5 px dot regardless of zoom; benchmark drawn as a ring. Label text is `surveyLabel(o)` (`A BM`, `C -12.4 cm`, or `C 1.124 m` when no benchmark) and is drawn **regardless of the Dims toggle** — it is the data. No resize/rotate handles.
@@ -130,11 +138,14 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - `ft-in` / `ft.dec` top-bar button toggles every displayed length between `30'-2"` and `30.17 ft`.
 - Place item: click repeatedly; Esc stops. Ghost preview follows cursor.
 - Select: drag = move; drag vertex = reshape; click midpoint "+" = insert vertex; Alt-click vertex = delete; drag corner square = resize (circles stay round); heads have radius handle (white) and arc handles (orange).
-- Keys: V select, H pan, M measure, Enter finish, Esc cancel/deselect, Del delete, R rotate 15° (Shift+R 90°), Ctrl+D duplicate, Ctrl+Z/Y, G grid, S snap, D dims, F fit, arrows nudge 6" (Shift 12").
+- Keys: V select, H pan, M measure, Enter finish, Esc cancel/deselect, Del delete, R rotate 15° (Shift+R 90°), Ctrl+D duplicate, Ctrl+Z/Y, G grid, S snap, D dims, F fit, arrows nudge 6" (Shift 12"). **While drawing, Ctrl+Z / Backspace / Delete remove the last point** and never touch app history. App-level undo/redo call `notice(histDiff(...))` — "Removed X — Ctrl+Y brings it back".
 - Length inputs accept `12'6"`, `12' 6`, `12.5` (feet), `150in`, `12ft 6in` (`parseLen`).
 - Top bar: New, Import (JSON), Export (JSON), PNG (prompts px/ft; renders offscreen at that scale with a title block, restores view), BOM CSV, Undo/Redo, Grid/Snap/Dims/Arcs toggles, Fit, Supply GPM/PSI.
 - Survey: Survey / grade → Survey point, click to place (repeat). Properties: reading (m), Benchmark tick, note. Survey tab for the table, high/low, slope and CSV.
 - Right tabs: Properties (context form), Layers (eye/lock), Zones, BOM, Survey, Help.
+
+## Added in 2026.09.14.3
+- Smooth curves through control points for any area or run (Smooth tick); circle and rectangle draw modes; walking paths (river rock, paver, stepping stones in rock) with textures, real-width hit-testing and full BOM incl. paver base and edging; survey readings default to cm; Ctrl+Z/Backspace remove the last point while drawing; undo/redo announce what they changed.
 
 ## Added in 2026.09.14.2
 - Measured layout: type a side length while drawing (direct distance entry) with polar tracking, Shift ortho, exact non-snapped placement, and traverse closing-gap report. Edges table in Properties. ft-in / decimal-ft display toggle.
@@ -164,6 +175,7 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - Autosave has no `beforeunload` flush; a change made inside the 400 ms debounce window is lost if the tab closes.
 - `computeBom()` hardcodes a rule per object kind; if the library keeps growing, move BOM rules onto the `LIB` entries.
 - Supply GPM/PSI default to 6/50 with no prompt to measure. Every zone number downstream depends on those two being real.
+- Curves: uniform Catmull-Rom only (no tension control, no Bézier handles, no arc-by-three-points). A circle's 8 span labels are noisy at small sizes — toggle Dims. Walking-path textures are screen-space (do not scale with zoom), by design.
 - Typed lengths: no typed angle syntax (`30.17 @ 37`); direction is by mouse only. No closing-error *distribution* (compass-rule adjustment) — the gap is reported, not spread across the sides.
 - Survey: no turning points (single instrument setup assumed); no contour/heat-map rendering; `migrate` can under-derive `nextLabel` for a pre-2026.09.14.1 file whose highest-labelled point was deleted (labels could then repeat once — only affects files that never had the field).
 - Yard measurements are pending; lawn on record is 45×22 ft minus a 9×15 ft patio plus an 8×15 ft strip (975 sq ft), Monaco Bermuda seeding planned 2027.

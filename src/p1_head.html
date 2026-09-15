@@ -31,6 +31,8 @@ input[type=range]{padding:0}
 #right{width:320px;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 #canvasWrap{flex:1;position:relative;background:#fafaf7;overflow:hidden;cursor:crosshair}
 #c{position:absolute;inset:0;display:block}
+#areaShape{display:flex;gap:4px;padding:6px 8px 0}
+#areaShape button{flex:1;font-size:11px;padding:3px 4px}
 #lenBox{position:absolute;width:96px;padding:4px 6px;font-size:13px;background:#fff;color:#111;border:2px solid var(--acc);border-radius:5px;box-shadow:0 2px 8px rgba(0,0,0,.35);z-index:5}
 #lenBox.bad{border-color:var(--bad)}
 #hud{position:absolute;left:8px;bottom:8px;background:rgba(20,24,28,.85);color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;pointer-events:none;white-space:pre}
@@ -110,7 +112,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
 <div id="main">
   <aside id="left">
     <div class="sec"><h3>Tools</h3><div class="body tools" id="toolBtns"></div></div>
-    <div class="sec"><h3>Draw areas</h3><div class="body" id="libAreas"></div></div>
+    <div class="sec"><h3>Draw areas</h3><div class="body" id="areaShape"><button data-shape="poly" title="Click each corner">Polygon</button><button data-shape="rect" title="Two corners, or type W x H">Rectangle</button><button data-shape="circle" title="Centre, then radius">Circle</button></div><div class="body" id="libAreas"></div></div>
     <div class="sec"><h3>Runs (lines)</h3><div class="body" id="libRuns"></div></div>
     <div class="sec"><h3>Survey / grade</h3><div class="body" id="libSurvey"></div></div>
     <div class="sec"><h3>Irrigation</h3><div class="body" id="libIrrigation"></div></div>
@@ -149,9 +151,13 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
       <h4>Mouse</h4>
       <div class="note">Wheel = zoom. Middle-drag, right-drag or Space+drag = pan. In Select: drag to move, drag a vertex to reshape, drag the square handle to resize, click an edge midpoint (+) to add a vertex, Alt+click a vertex to delete it.</div>
       <h4>Keys</h4>
-      <div class="note"><kbd>V</kbd> select <kbd>H</kbd> pan <kbd>M</kbd> measure <kbd>Enter</kbd> finish <kbd>Esc</kbd> cancel <kbd>Del</kbd> delete <kbd>R</kbd> rotate 15° (<kbd>Shift</kbd>+<kbd>R</kbd> 90°) <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo <kbd>G</kbd> grid <kbd>S</kbd> snap <kbd>D</kbd> dims <kbd>F</kbd> fit <kbd>arrows</kbd> nudge 6"</div>
+      <div class="note"><kbd>V</kbd> select <kbd>H</kbd> pan <kbd>M</kbd> measure <kbd>Enter</kbd> finish <kbd>Esc</kbd> cancel <kbd>Del</kbd> delete (<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> while drawing = remove last point) <kbd>R</kbd> rotate 15° (<kbd>Shift</kbd>+<kbd>R</kbd> 90°) <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo <kbd>G</kbd> grid <kbd>S</kbd> snap <kbd>D</kbd> dims <kbd>F</kbd> fit <kbd>arrows</kbd> nudge 6"</div>
       <h4>Lengths</h4>
       <div class="note">Type lengths as <code>12'6"</code>, <code>12' 6</code>, <code>12.5</code> or <code>30.17ft</code> (decimal feet), or <code>150in</code>.</div>
+      <h4>Shapes and curves</h4>
+      <div class="note">Draw areas has a shape switch: <b>Polygon</b> (click each corner), <b>Rectangle</b> (two corners, or click one and type <code>30.17x20</code>), <b>Circle</b> (click the centre, then click or type the radius). A circle is made of 8 draggable points, so you can pull it into an oval or a kidney. Tick <b>Smooth</b> in Properties on any area or run to turn it into a curve through its points — lengths, areas and the BOM follow the real curve. Conduit can't be smoothed; PVC doesn't bend that way.</div>
+      <h4>Walking paths</h4>
+      <div class="note">Runs → River rock path, Paver path, or Stepping stones in rock. They're wide runs — set the width, rock depth, paver size and stone spacing in Properties — drawn smooth by default. The BOM lists rock by the ton, pavers with 5% waste, 4" gravel base + 1" sand under pavers, and edging for both sides.</div>
       <h4>Measured layout (tape)</h4>
       <div class="note">While drawing an area or run, point the mouse the way the side runs and type its length — <code>30.17</code> — then Enter. The next corner lands exactly that far, not snapped to the grid. The direction follows the mouse in 1° steps and locks to 0/45/90° whenever you are within 5° of one; hold Shift (or Shift+Enter) to force the lock. Keep going round; when a typed side lands within a foot of the start it closes the shape and reports the closing gap. To fix a side afterwards, select the shape and edit its length in the Edges table in Properties — the far corner slides along the edge. The <b>ft-in / ft.dec</b> button switches every length in the app between <code>30'-2"</code> and <code>30.17 ft</code>.</div>
       <h4>Survey / grade</h4>

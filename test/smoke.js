@@ -131,12 +131,12 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   console.log('\n--- survey: readings, benchmark, both units ---');
   const sv = await page.evaluate(() => {
     const P = l => state.objects.find(o => o.kind === 'spoint' && o.props.label === l);
-    P('A').props.reading = parseMetric('1.000'); P('A').props.bench = true;
-    P('C').props.reading = parseMetric('1.124');   // 12.4 cm lower than A
-    P('D').props.reading = parseMetric('95cm');    // 5 cm higher than A
+    P('A').props.reading = parseMetric('100'); P('A').props.bench = true;   // cm is the default unit
+    P('C').props.reading = parseMetric('112.4');   // 12.4 cm lower than A
+    P('D').props.reading = parseMetric('0.95m');   // 5 cm higher than A
     refresh();
     return {
-      parsed: [parseMetric('1.235'), parseMetric('1.235m'), parseMetric('123.5cm'), parseMetric('1235mm'), parseMetric('abc')],
+      parsed: [parseMetric('123.5'), parseMetric('1.235m'), parseMetric('123.5cm'), parseMetric('1235mm'), parseMetric('abc')],
       deltas: [deltaMm(P('A')), deltaMm(P('C')), deltaMm(P('D'))],
       cm: fmtCm(deltaMm(P('C'))), inch: fmtLen(mmToIn(deltaMm(P('C')))), up: fmtCm(deltaMm(P('D'))),
       canvasLabel: surveyLabel(P('C')), bmLabel: surveyLabel(P('A')),
@@ -144,7 +144,7 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
       layers: document.querySelector('#tab-layers').innerText,
     };
   });
-  eq(sv.parsed.slice(0, 4), [1235, 1235, 1235, 1235], 'parseMetric accepts m, cm, mm');
+  eq(sv.parsed.slice(0, 4), [1235, 1235, 1235, 1235], 'parseMetric: bare number is cm; m, cm, mm suffixes work');
   assert(Number.isNaN(sv.parsed[4]), 'parseMetric rejects garbage');
   eq(sv.deltas, [0, -124, 50], 'delta from benchmark: bench = 0, higher rod reading = lower ground');
   eq(sv.cm, '-12.4 cm', 'delta in cm');
@@ -152,7 +152,7 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   eq(sv.up, '+5.0 cm', 'positive delta carries a + sign');
   eq(sv.canvasLabel, 'C -12.4 cm', 'canvas label shows point + delta');
   eq(sv.bmLabel, 'A BM', 'benchmark canvas label');
-  assert(/Benchmark A/.test(sv.tab) && /-12\.4 cm/.test(sv.tab) && /-5"/.test(sv.tab) && /\+5\.0 cm/.test(sv.tab), 'survey tab lists deltas in both metric and inches');
+  assert(/Benchmark A · reading 100\.0 cm/.test(sv.tab) && /-12\.4 cm/.test(sv.tab) && /-5"/.test(sv.tab) && /\+5\.0 cm/.test(sv.tab), 'survey tab shows the reading in cm and deltas in both metric and inches');
   assert(/Highest D/.test(sv.tab) && /lowest C/.test(sv.tab) && /total fall 17\.4 cm/.test(sv.tab), 'survey tab finds high, low and total fall');
   assert(/Survey \/ grade/.test(sv.layers), 'survey layer appears in Layers tab');
 
@@ -172,8 +172,8 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   await page.evaluate(() => { ui.selId = state.objects.find(o => o.kind === 'spoint' && o.props.label === 'C').id; refresh(); const i = document.querySelector('[data-bench]'); i.checked = true; i.dispatchEvent(new Event('change')); });
   eq(await page.evaluate(() => state.objects.filter(o => o.kind === 'spoint' && o.props.bench).map(o => o.props.label)), ['C'], 'ticking Benchmark on C clears it on A');
   const csv = await page.evaluate(() => surveyCsvText());
-  assert(/^Point,Reading_m,Delta_cm,Delta_in/.test(csv) && csv.trim().split('\n').length === 4, 'survey CSV has header + one row per point');
-  assert(/"A","1\.000"/.test(csv) && /"C","1\.124","0\.0","0\.00"/.test(csv), 'CSV rows carry reading and delta');
+  assert(/^Point,Reading_cm,Delta_cm,Delta_in/.test(csv) && csv.trim().split('\n').length === 4, 'survey CSV has header + one row per point');
+  assert(/^Point,Reading_cm/.test(csv) && /"A","100\.0"/.test(csv) && /"C","112\.4","0\.0","0\.00"/.test(csv), 'CSV rows carry reading (cm) and delta');
   const mig = await page.evaluate(() => { const st = JSON.parse(JSON.stringify(state)); delete st.nextLabel; delete st.slope; migrate(st); return [st.nextLabel, JSON.stringify(st.slope)]; });
   eq(mig, [4, '{"a":null,"b":null}'], 'migrate derives nextLabel = max surviving label + 1 (A,C,D → 4) and defaults slope');
   await page.evaluate(() => { ui.selId = null; refresh(); });
@@ -225,6 +225,66 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   await page.click('#btnUnits');
   eq(await page.evaluate(() => [state.units, fmtLen(362.04)]), ['ftin', '30\'-2"'], 'toggle back to feet-inches');
   eq(await page.evaluate(() => { const st = JSON.parse(JSON.stringify(state)); delete st.units; migrate(st); return st.units; }), 'ftin', 'migrate defaults units for older files');
+  await page.evaluate(() => { ui.selId = null; refresh(); });
+
+  console.log('\n--- undo while drawing, and undo that says what it did ---');
+  await click('fence'); await cw(5 * 12, 44 * 12); await cw(15 * 12, 44 * 12); await cw(25 * 12, 44 * 12);
+  const objsBefore = await page.evaluate(() => state.objects.length);
+  await page.keyboard.press('Control+z');
+  eq(await page.evaluate(() => [ui.drawPts.length, state.objects.length]), [2, objsBefore], 'Ctrl+Z mid-draw removes the last point, not an object');
+  await page.keyboard.press('Backspace');
+  eq(await page.evaluate(() => ui.drawPts.length), 1, 'Backspace mid-draw removes another point');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await click('gfci'); await cw(38 * 12, 5 * 12); await page.keyboard.press('Escape');
+  const nG = await page.evaluate(() => state.objects.filter(o => o.kind === 'gfci').length);
+  await page.keyboard.press('Control+z');
+  const un = await page.evaluate(() => ({ hint: document.querySelector('#hint').textContent, n: state.objects.filter(o => o.kind === 'gfci').length }));
+  eq(un.n, nG - 1, 'Ctrl+Z removed the just-placed GFCI');
+  assert(/^Removed In-use GFCI.*Ctrl\+Y brings it back$/.test(un.hint), 'undo says what it removed and how to get it back: ' + JSON.stringify(un.hint));
+  await page.keyboard.press('Control+y');
+  const re = await page.evaluate(() => ({ hint: document.querySelector('#hint').textContent, n: state.objects.filter(o => o.kind === 'gfci').length }));
+  eq(re.n, nG, 'Ctrl+Y brought it back');
+  assert(/^Restored In-use GFCI.*Ctrl\+Z removes it again$/.test(re.hint), 'redo notice is contextual: ' + JSON.stringify(re.hint));
+  eq(await page.evaluate(() => fmtLen(-0.04)), '0"', 'fmtLen never prints -0"');
+
+  console.log('\n--- shapes: smooth curves, circle, rectangle ---');
+  const cmath = await page.evaluate(() => { const c = circlePts(0, 0, 120); const g = curvePts(c, true); return { n: c.length, area: polyArea(g), perim: pathLen(g.concat([g[0]])), samples: g.length }; });
+  eq([cmath.n, cmath.samples], [8, 64], 'circle = 8 control points, 64 curve samples');
+  assert(Math.abs(cmath.area / (Math.PI * 120 * 120) - 1) < 0.002, 'corrected 8-point circle area within 0.2% of πr² (' + cmath.area.toFixed(0) + ' vs ' + (Math.PI * 14400).toFixed(0) + ')');
+  assert(Math.abs(cmath.perim / (2 * Math.PI * 120) - 1) < 0.005, 'and perimeter within 0.5% of 2πr (' + cmath.perim.toFixed(1) + ' vs ' + (2 * Math.PI * 120).toFixed(1) + ')');
+  await page.click('#areaShape button[data-shape="circle"]');
+  await click('area'); await cw(30 * 12, 45 * 12); await cw(35 * 12, 45 * 12);
+  const circ = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'area' && x.props.smooth); return o && { n: o.pts.length, smooth: o.props.smooth, area: objArea(o), drawing: ui.drawPts.length }; });
+  assert(circ && circ.n === 8 && circ.smooth === true && circ.drawing === 0, 'circle mode: centre click + radius click makes an 8-point smooth area');
+  assert(circ && Math.abs(circ.area / (Math.PI * 60 * 60) - 1) < 0.002, 'its area is that of a 5 ft radius circle (' + (circ && circ.area / 144).toFixed(1) + ' sq ft)');
+  const bulge = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'area' && x.props.smooth); const a = Math.PI / 8; const p = [30 * 12 + Math.cos(a) * 58, 45 * 12 + Math.sin(a) * 58]; return { hit: hitTest(p) === o, insideChords: pointInPoly(p, o.pts) }; });
+  eq([bulge.hit, bulge.insideChords], [true, false], 'hit-test follows the curve: a point outside the 8-gon but inside the circle selects it');
+  await page.click('#areaShape button[data-shape="rect"]');
+  await click('area'); await cw(38 * 12, 40 * 12); await page.keyboard.type('6x4'); await page.keyboard.press('Enter');
+  const rc = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'area' && x.pts.length === 4 && x.pts[0][0] === 456); return o && { pts: o.pts, drawing: ui.drawPts.length, smooth: !!o.props.smooth }; });
+  eq(rc && [rc.pts, rc.drawing, rc.smooth], [[[456, 480], [528, 480], [528, 528], [456, 528]], 0, false], 'rectangle mode: one corner + typed 6x4 makes a 6 ft × 4 ft rectangle, not smooth');
+  await page.click('#areaShape button[data-shape="poly"]'); await page.keyboard.press('Escape');
+  await click('fence'); await cw(30 * 12, 55 * 12); await cw(40 * 12, 55 * 12); await cw(40 * 12, 60 * 12); await page.keyboard.press('Enter'); await page.keyboard.press('Escape');
+  const sm = await page.evaluate(() => { const o = state.objects.filter(x => x.kind === 'fence').pop(); ui.selId = o.id; refresh(); const L0 = objLen(o); const cb = document.querySelector('[data-boolprop="smooth"]'); cb.checked = true; cb.dispatchEvent(new Event('change')); return { smooth: o.props.smooth, n: geomPts(o).length, L0, L1: objLen(o), edgesHidden: !document.querySelector('[data-edge]') }; });
+  eq([sm.smooth, sm.n, sm.edgesHidden], [true, 17, true], 'Smooth tick: a 3-point fence becomes a 17-sample curve and the Edges table hides');
+  assert(sm.L1 !== sm.L0 && sm.L1 > 0.9 * sm.L0 && sm.L1 < 1.3 * sm.L0, 'curved length differs sensibly from the polyline (' + sm.L0 + ' → ' + sm.L1.toFixed(1) + ')');
+  eq(await page.evaluate(() => { ui.selId = state.objects.find(x => x.kind === 'conduit').id; refresh(); return !!document.querySelector('[data-boolprop="smooth"]'); }), false, 'conduit has no Smooth option');
+  await page.evaluate(() => { ui.selId = null; refresh(); });
+
+  console.log('\n--- walking paths ---');
+  await click('walkrock'); await cw(5 * 12, 55 * 12); await cw(25 * 12, 55 * 12); await page.keyboard.press('Enter');
+  const wr = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'walkrock'); const rows = computeBom().filter(r => /River rock path|Landscape edging/.test(r.item)); return { smooth: o.props.smooth, width: o.props.width, len: objLen(o), rows: rows.map(r => [r.key, r.qty, r.unit]) }; });
+  eq([wr.smooth, wr.width, wr.len], [true, 36, 240], 'river rock path: smooth by default, 3 ft wide; a straight 2-point run is 20 ft');
+  eq(wr.rows, [['rock-ton', 0.75, 'ton'], ['edging-ft', 40, 'ft']], 'BOM: 0.75 ton of rock (20 × 3 ft at 3"), 40 ft of edging');
+  await click('walkstep'); await cw(5 * 12, 62 * 12); await cw(25 * 12, 62 * 12); await page.keyboard.press('Enter');   // 7 ft below the rock path: two 3 ft wide runs must not overlap for the hit-test below
+  const ws = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'walkstep'); return { stones: stoneCount(o), row: computeBom().find(r => /Stepping stones/.test(r.item)).qty, rock: computeBom().find(r => /rock between stones/.test(r.item)).qty }; });
+  eq([ws.stones, ws.row], [10, 10], 'stepping stones: 20 ft at 24" o.c., first at 12" in → 10 stones');
+  assert(ws.rock > 0 && ws.rock < 0.75, 'rock between stones is less than a solid rock path of the same size (' + ws.rock + ' ton)');
+  await click('walkpaver'); await cw(30 * 12, 62 * 12); await cw(40 * 12, 62 * 12); await page.keyboard.press('Enter'); await page.keyboard.press('Escape');
+  const wp = await page.evaluate(() => computeBom().filter(r => /Paver path|Paver base gravel 4" — Paver path|Bedding sand 1" — Paver path|Paver edging/.test(r.item)).map(r => [r.key, r.qty]));
+  eq(wp, [['paver-unit', 32], ['paver-base-gravel', 0.37], ['paver-sand', 0.09], ['edging-ft', 20]], 'paver path 10 × 3 ft: 32 pavers (12x12, +5%), 4" gravel + 1" sand base, 20 ft edging');
+  const hitWide = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'walkrock'); return hitTest([15 * 12, 55 * 12 + 15]) === o; });
+  assert(hitWide, 'a wide path is selectable 15" off its centreline (inside its 36" width)');
   await page.evaluate(() => { ui.selId = null; refresh(); });
 
   console.log('\n--- JSON round-trip ---');

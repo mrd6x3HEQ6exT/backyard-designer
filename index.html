@@ -31,6 +31,8 @@ input[type=range]{padding:0}
 #right{width:320px;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 #canvasWrap{flex:1;position:relative;background:#fafaf7;overflow:hidden;cursor:crosshair}
 #c{position:absolute;inset:0;display:block}
+#areaShape{display:flex;gap:4px;padding:6px 8px 0}
+#areaShape button{flex:1;font-size:11px;padding:3px 4px}
 #lenBox{position:absolute;width:96px;padding:4px 6px;font-size:13px;background:#fff;color:#111;border:2px solid var(--acc);border-radius:5px;box-shadow:0 2px 8px rgba(0,0,0,.35);z-index:5}
 #lenBox.bad{border-color:var(--bad)}
 #hud{position:absolute;left:8px;bottom:8px;background:rgba(20,24,28,.85);color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;pointer-events:none;white-space:pre}
@@ -110,7 +112,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
 <div id="main">
   <aside id="left">
     <div class="sec"><h3>Tools</h3><div class="body tools" id="toolBtns"></div></div>
-    <div class="sec"><h3>Draw areas</h3><div class="body" id="libAreas"></div></div>
+    <div class="sec"><h3>Draw areas</h3><div class="body" id="areaShape"><button data-shape="poly" title="Click each corner">Polygon</button><button data-shape="rect" title="Two corners, or type W x H">Rectangle</button><button data-shape="circle" title="Centre, then radius">Circle</button></div><div class="body" id="libAreas"></div></div>
     <div class="sec"><h3>Runs (lines)</h3><div class="body" id="libRuns"></div></div>
     <div class="sec"><h3>Survey / grade</h3><div class="body" id="libSurvey"></div></div>
     <div class="sec"><h3>Irrigation</h3><div class="body" id="libIrrigation"></div></div>
@@ -149,9 +151,13 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
       <h4>Mouse</h4>
       <div class="note">Wheel = zoom. Middle-drag, right-drag or Space+drag = pan. In Select: drag to move, drag a vertex to reshape, drag the square handle to resize, click an edge midpoint (+) to add a vertex, Alt+click a vertex to delete it.</div>
       <h4>Keys</h4>
-      <div class="note"><kbd>V</kbd> select <kbd>H</kbd> pan <kbd>M</kbd> measure <kbd>Enter</kbd> finish <kbd>Esc</kbd> cancel <kbd>Del</kbd> delete <kbd>R</kbd> rotate 15° (<kbd>Shift</kbd>+<kbd>R</kbd> 90°) <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo <kbd>G</kbd> grid <kbd>S</kbd> snap <kbd>D</kbd> dims <kbd>F</kbd> fit <kbd>arrows</kbd> nudge 6"</div>
+      <div class="note"><kbd>V</kbd> select <kbd>H</kbd> pan <kbd>M</kbd> measure <kbd>Enter</kbd> finish <kbd>Esc</kbd> cancel <kbd>Del</kbd> delete (<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> while drawing = remove last point) <kbd>R</kbd> rotate 15° (<kbd>Shift</kbd>+<kbd>R</kbd> 90°) <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo/redo <kbd>G</kbd> grid <kbd>S</kbd> snap <kbd>D</kbd> dims <kbd>F</kbd> fit <kbd>arrows</kbd> nudge 6"</div>
       <h4>Lengths</h4>
       <div class="note">Type lengths as <code>12'6"</code>, <code>12' 6</code>, <code>12.5</code> or <code>30.17ft</code> (decimal feet), or <code>150in</code>.</div>
+      <h4>Shapes and curves</h4>
+      <div class="note">Draw areas has a shape switch: <b>Polygon</b> (click each corner), <b>Rectangle</b> (two corners, or click one and type <code>30.17x20</code>), <b>Circle</b> (click the centre, then click or type the radius). A circle is made of 8 draggable points, so you can pull it into an oval or a kidney. Tick <b>Smooth</b> in Properties on any area or run to turn it into a curve through its points — lengths, areas and the BOM follow the real curve. Conduit can't be smoothed; PVC doesn't bend that way.</div>
+      <h4>Walking paths</h4>
+      <div class="note">Runs → River rock path, Paver path, or Stepping stones in rock. They're wide runs — set the width, rock depth, paver size and stone spacing in Properties — drawn smooth by default. The BOM lists rock by the ton, pavers with 5% waste, 4" gravel base + 1" sand under pavers, and edging for both sides.</div>
       <h4>Measured layout (tape)</h4>
       <div class="note">While drawing an area or run, point the mouse the way the side runs and type its length — <code>30.17</code> — then Enter. The next corner lands exactly that far, not snapped to the grid. The direction follows the mouse in 1° steps and locks to 0/45/90° whenever you are within 5° of one; hold Shift (or Shift+Enter) to force the lock. Keep going round; when a typed side lands within a foot of the start it closes the shape and reports the closing gap. To fix a side afterwards, select the shape and edit its length in the Edges table in Properties — the far corner slides along the edge. The <b>ft-in / ft.dec</b> button switches every length in the app between <code>30'-2"</code> and <code>30.17 ft</code>.</div>
       <h4>Survey / grade</h4>
@@ -166,7 +172,7 @@ kbd{background:#111;border:1px solid var(--line);border-radius:3px;padding:0 4px
 </div>
 <script>
 'use strict';
-const BUILD_ID = '2026.09.14.2';
+const BUILD_ID = '2026.09.14.3';
 const GRID = 6;           // inches
 const FT = 12;
 
@@ -248,6 +254,10 @@ const LIB = {
     {id:'conduit', name:'Cantex ¾" PVC conduit run',        tool:'path', kind:'conduit', layer:'conduit',    color:'#fb8c00'},
     {id:'wire',    name:'Low-voltage lighting wire',        tool:'path', kind:'wire',    layer:'lighting',   color:'#8e24aa'},
     {id:'trench',  name:'Trench',                           tool:'path', kind:'trench',  layer:'trench',     color:'#6d4c41'},
+    // Walking paths: wide runs. width/depth/spacing in inches. smooth:true so they meander by default.
+    {id:'walkrock', name:'River rock path',                 tool:'path', kind:'walkrock', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3, smooth:true}},
+    {id:'walkpaver',name:'Paver path',                      tool:'path', kind:'walkpaver',layer:'hardscape', color:'#c9a27a', props:{width:36, paver:'12x12', smooth:true}},
+    {id:'walkstep', name:'Stepping stones in rock',         tool:'path', kind:'walkstep', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3, spacing:24, paver:'16x16', smooth:true}},
   ],
   irrigation: [
     {id:'head',      name:'Sprinkler head',                     tool:'item', kind:'head',   layer:'irrigation', w:4,  h:4,  shape:'head',   color:'#1e88e5'},
@@ -317,6 +327,9 @@ const KIND_STYLE = {
   conduit:{stroke:'#fb8c00', width:3.5},
   wire:   {stroke:'#8e24aa', width:2, dash:[3,4]},
   trench: {stroke:'rgba(109,76,65,.35)', width:12},
+  walkrock: {stroke:'#8d8d8d', width:3, edge:'#7a7a7a'},
+  walkpaver:{stroke:'#8d6e63', width:3, edge:'#6d4c41'},
+  walkstep: {stroke:'#8d8d8d', width:3, edge:'#7a7a7a'},
 };
 
 const PAVER_SIZES = [{id:'12x12',w:12,h:12},{id:'16x16',w:16,h:16},{id:'24x24',w:24,h:24},{id:'6x9',w:6,h:9},{id:'12x24',w:12,h:24}];
@@ -328,7 +341,7 @@ const DEFAULT_PRICES = {
   'pipe-ft':0.45,'pipe-elbow':2.5,'pipe-tee':2.8,'pipe-endcap':2.0,'timer':45,'manifold':60,'backflow':10,'filter':20,'floatvalve':15,'valvebox':15,
   'drip-ft':0.12,'drip12-ft':0.35,'emitter':0.5,
   'trench-ft':0,'fence-ft':0,
-  'rock-ton':110,'paver-unit':2.5,'patio-sqft':0,'fountain':1755,'fountain-pad':0,'boulder':60,'firepit':0,'raisedbed':0,'furniture':0,'shed':0,'fixed':0,'gate':0,'tree':0,'shrub':0,
+  'rock-ton':110,'paver-unit':2.5,'edging-ft':1.5,'paver-base-gravel':45,'paver-sand':40,'patio-sqft':0,'fountain':1755,'fountain-pad':0,'boulder':60,'firepit':0,'raisedbed':0,'furniture':0,'shed':0,'fixed':0,'gate':0,'tree':0,'shrub':0,
   'wire-ft':0.6,'transformer':80,'pathlight':25,'spot':20,'well':25,'walllight':20,'stringpost':30,
   'plant':8,
 };
@@ -358,6 +371,7 @@ const ui = {
   selId:null, drag:null, hover:null,
   showGrid:true, snap:true, showDims:true, showArcs:true,
   measure:null, panning:null, space:false,
+  areaShape:'poly',                   // Draw-areas shape switch: poly | rect | circle
   hist:[], redo:[],
 };
 const $ = s=>document.querySelector(s);
@@ -375,7 +389,7 @@ const fmtLen = inches => {
   if(rem>=12){ft++;rem=0;}
   const inStr = rem? (Number.isInteger(rem)?rem:rem.toFixed(2).replace(/0+$/,'').replace(/\.$/,''))+'"' : '';
   let s = ft? ft+"'"+(inStr?'-'+inStr:'') : (inStr||'0"');
-  return (neg?'-':'')+s;
+  return (neg&&s!=='0"'?'-':'')+s;   // never print -0"
 };
 const fmtFt = inches => (inches/12).toFixed(1)+' ft';
 const fmtArea = sqin => (sqin/144).toFixed(1)+' sq ft';
@@ -432,25 +446,36 @@ const headGpm = o => { const h=headSpec(o); const r=o.props.radius/12; return +(
 function alphaLabel(n){ let s=''; n=n+1; while(n>0){ n--; s=String.fromCharCode(65+n%26)+s; n=Math.floor(n/26); } return s; }
 function labelIndex(s){ let n=0; for(const ch of String(s).toUpperCase()) n=n*26+(ch.charCodeAt(0)-64); return n-1; }
 const mmToIn = mm => mm/25.4;
-const fmtM   = mm => (mm/1000).toFixed(3)+' m';
-const fmtMNum= mm => (mm/1000).toFixed(3);
+const fmtReading    = mm => (mm/10).toFixed(1)+' cm';   // rod readings are entered and shown in cm
+const fmtReadingNum = mm => (mm/10).toFixed(1);
 const fmtCm  = (mm, sign=true) => { const v=mm/10; return (sign&&v>0?'+':'')+v.toFixed(1)+' cm'; };
-// Accepts 1.235, 1.235m, 123.5cm, 1235mm (unit defaults to metres). Returns integer mm, or NaN.
-function parseMetric(s){ const m=String(s).trim().toLowerCase().match(/^(-?\d+(?:\.\d+)?)\s*(m|cm|mm)?$/); if(!m) return NaN; const v=parseFloat(m[1]); return Math.round(m[2]==='cm'? v*10 : m[2]==='mm'? v : v*1000); }
+// Accepts 123.5, 123.5cm, 1.235m, 1235mm (unit defaults to cm). Returns integer mm, or NaN.
+function parseMetric(s){ const m=String(s).trim().toLowerCase().match(/^(-?\d+(?:\.\d+)?)\s*(m|cm|mm)?$/); if(!m) return NaN; const v=parseFloat(m[1]); return Math.round(m[2]==='m'? v*1000 : m[2]==='mm'? v : v*10); }
 const benchPoint = () => state.objects.find(o=>o.kind==='spoint'&&o.props.bench);
 // Elevation relative to the benchmark. A higher rod reading means lower ground, so delta = bench - reading.
 function deltaMm(o){ const bm=benchPoint(); if(!bm||bm.props.reading==null||o.props.reading==null) return null; return bm.props.reading-o.props.reading; }
 // Slope needs no benchmark: rise between two points is just the difference of their readings.
 function slopeBetween(A,B){ if(A.props.reading==null||B.props.reading==null) return null; const run=dist([A.x,A.y],[B.x,B.y]); if(!run) return null; const riseMm=A.props.reading-B.props.reading; const riseIn=mmToIn(riseMm); return {run, riseMm, riseIn, pct:riseIn/run*100, inPerFt:riseIn/(run/12)}; }
-function surveyLabel(o){ const L=o.props.label; if(o.props.bench) return L+' BM'; if(o.props.reading==null) return L; const d=deltaMm(o); return L+' '+(d==null? fmtM(o.props.reading) : fmtCm(d)); }
+function surveyLabel(o){ const L=o.props.label; if(o.props.bench) return L+' BM'; if(o.props.reading==null) return L; const d=deltaMm(o); return L+' '+(d==null? fmtReading(o.props.reading) : fmtCm(d)); }
 
 // ================= History / persistence =================
 // Snapshots carry the survey label counter alongside objects so undoing a placement rolls it back.
 const histSnap = () => JSON.stringify({o:state.objects, n:state.nextLabel});
 const histRestore = s => { const j=JSON.parse(s); state.objects=j.o; state.nextLabel=j.n; };
 function pushHist(){ ui.hist.push(histSnap()); if(ui.hist.length>100) ui.hist.shift(); ui.redo.length=0; }
-function undo(){ if(!ui.hist.length) return; ui.redo.push(histSnap()); histRestore(ui.hist.pop()); ui.selId=null; refresh(); }
-function redo(){ if(!ui.redo.length) return; ui.hist.push(histSnap()); histRestore(ui.redo.pop()); ui.selId=null; refresh(); }
+// Describe what a history step changed so undo/redo can say it out loud (nothing should vanish silently).
+function histDiff(before, after, isUndo){
+  const K = isUndo? ['Ctrl+Y brings it back','Ctrl+Y removes it again','Ctrl+Y redoes'] : ['Ctrl+Z brings it back','Ctrl+Z removes it again','Ctrl+Z undoes'];
+  const bId=new Set(before.map(o=>o.id)), aId=new Set(after.map(o=>o.id));
+  const gone=before.filter(o=>!aId.has(o.id)).map(o=>o.name), came=after.filter(o=>!bId.has(o.id)).map(o=>o.name);
+  const list=a=>a.length>3? a.slice(0,3).join(', ')+' +'+(a.length-3)+' more' : a.join(', ');
+  if(gone.length&&!came.length) return 'Removed '+list(gone)+' — '+K[0];
+  if(came.length&&!gone.length) return 'Restored '+list(came)+' — '+K[1];
+  if(gone.length||came.length) return 'Replaced '+list(gone)+' with '+list(came)+' — '+K[2];
+  return (isUndo?'Undid':'Redid')+' last edit — '+K[2];
+}
+function undo(){ if(!ui.hist.length) return; const before=state.objects; ui.redo.push(histSnap()); histRestore(ui.hist.pop()); ui.selId=null; refresh(); notice(histDiff(before, state.objects, true)); }
+function redo(){ if(!ui.redo.length) return; const before=state.objects; ui.hist.push(histSnap()); histRestore(ui.redo.pop()); ui.selId=null; refresh(); notice(histDiff(before, state.objects, false)); }
 let saveTimer=null;
 function autosave(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{ try{ localStorage.setItem('byd.state', JSON.stringify(state)); $('#stSave').textContent='autosaved '+new Date().toLocaleTimeString(); }catch(e){} },400); }
 function loadAutosave(){ try{ const s=localStorage.getItem('byd.state'); if(s){ const st=JSON.parse(s); migrate(st); state=st; return true; } }catch(e){} return false; }
@@ -466,8 +491,38 @@ function migrate(st){
 }
 
 // ================= Object creation =================
-function makePoly(lib, pts){ return {id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: lib.kind==='planter'?{}: {}}; }
-function makePath(lib, pts){ return {id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='trench'?{width:6,depth:18}:{}}; }
+function makePoly(lib, pts, extra){ return {id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: {}, extra||{})}; }
+function makePath(lib, pts){ return {id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='trench'?{width:6,depth:18}:{})}; }
+// Shape builders for the Draw-areas shape switch. A circle is 8 control points + smooth. Catmull-Rom through
+// points ON a circle runs ~0.5% inside it (1.1% low on area), so the control points are pushed out by
+// CIRCLE_K, computed once from the curve itself, and the drawn curve has the true radius to within 0.05%.
+function circlePts(cx, cy, r, n=8){ const k=n===8? CIRCLE_K : 1; const out=[]; for(let i=0;i<n;i++){ const a=i/n*2*Math.PI; out.push([r2(cx+Math.cos(a)*r*k), r2(cy+Math.sin(a)*r*k)]); } return out; }
+function rectPts(a, b){ return [[a[0],a[1]],[b[0],a[1]],[b[0],b[1]],[a[0],b[1]]]; }
+
+// ---- Smooth curves. Control points stay in o.pts; everything geometric reads geomPts(o). ----
+const CURVE_SEG = 8;   // samples per span
+// Catmull-Rom through pts. Closed shapes wrap; open ones clamp the ends. Returns the dense polyline.
+function curvePts(pts, closed, seg=CURVE_SEG){
+  const N=pts.length; if(N<(closed?3:2)) return pts.slice();
+  const P=i=> closed? pts[((i%N)+N)%N] : pts[Math.max(0,Math.min(N-1,i))];
+  const out=[]; const spans= closed? N : N-1;
+  for(let i=0;i<spans;i++){ const p0=P(i-1),p1=P(i),p2=P(i+1),p3=P(i+2);
+    for(let k=0;k<seg;k++){ const t=k/seg, t2=t*t, t3=t2*t;
+      out.push([ 0.5*((2*p1[0])+(-p0[0]+p2[0])*t+(2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2+(-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+                 0.5*((2*p1[1])+(-p0[1]+p2[1])*t+(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2+(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3) ]); } }
+  if(!closed) out.push(pts[N-1].slice());
+  return out;
+}
+const CIRCLE_K = (()=>{ const raw=[]; for(let i=0;i<8;i++){ const a=i/8*2*Math.PI; raw.push([Math.cos(a),Math.sin(a)]); } return Math.sqrt(Math.PI/polyArea(curvePts(raw,true))); })();
+const isSmooth = o => !!(o.props&&o.props.smooth) && o.kind!=='conduit' && o.pts.length>=(o.type==='poly'?3:2);
+const geomPts  = o => isSmooth(o)? curvePts(o.pts, o.type==='poly') : o.pts;
+const objArea  = o => polyArea(geomPts(o));
+const objLen   = o => pathLen(geomPts(o));                                   // open length
+const objPerim = o => { const g=geomPts(o); return pathLen(g.concat([g[0]])); };
+// Per-span lengths and label anchors for dimension labels on a smooth shape.
+function curveSpans(o){ const g=curvePts(o.pts, o.type==='poly'), closed=o.type==='poly', spans=closed? o.pts.length : o.pts.length-1, out=[];
+  for(let i=0;i<spans;i++){ const seg=g.slice(i*CURVE_SEG, i*CURVE_SEG+CURVE_SEG+1); if(closed&&i===spans-1) seg.push(g[0]); const m=seg[Math.floor(seg.length/2)]; const a=seg[0], b=seg[seg.length-1]; out.push({len:pathLen(seg), mid:m, dx:b[0]-a[0], dy:b[1]-a[1]}); }
+  return out; }
 // ghost=true is the cursor preview: it shows the next label without consuming it.
 function makeItem(lib, x, y, ghost){
   const o={id:uid(), type:'item', kind:lib.kind, layer:lib.layer, name:lib.name, x, y, w:lib.w, h:lib.h, rot:0, shape:lib.shape, color:lib.color, props:Object.assign({}, lib.props||{})};
@@ -482,7 +537,8 @@ function itemBox(o){ // local unrotated box centered at x,y
 function toLocal(o,p){ const a=-o.rot*Math.PI/180, dx=p[0]-o.x, dy=p[1]-o.y; return [o.x+dx*Math.cos(a)-dy*Math.sin(a), o.y+dx*Math.sin(a)+dy*Math.cos(a)]; }
 function objBounds(o){
   if(o.type==='item'){ const r=Math.max(o.w,o.h)/2*(o.kind==='head'?0:1); let rr=r; if(o.kind==='head') rr=Math.max(4,ui.showArcs?o.props.radius:4); if(o.kind==='fountain'&&o.props.pad) rr=Math.max(rr,o.props.padSize/2); return {x0:o.x-rr,y0:o.y-rr,x1:o.x+rr,y1:o.y+rr}; }
-  const xs=o.pts.map(p=>p[0]), ys=o.pts.map(p=>p[1]); return {x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};
+  const g=geomPts(o), xs=g.map(p=>p[0]), ys=g.map(p=>p[1]); const pad=(o.props&&o.props.width)? o.props.width/2 : 0;
+  return {x0:Math.min(...xs)-pad,y0:Math.min(...ys)-pad,x1:Math.max(...xs)+pad,y1:Math.max(...ys)+pad};
 }
 function allBounds(){ if(!state.objects.length) return null; let b={x0:1e9,y0:1e9,x1:-1e9,y1:-1e9}; state.objects.forEach(o=>{const q=objBounds(o); b.x0=Math.min(b.x0,q.x0);b.y0=Math.min(b.y0,q.y0);b.x1=Math.max(b.x1,q.x1);b.y1=Math.max(b.y1,q.y1);}); return b; }
 function objLayerVisible(o){ return state.layers[o.layer]?.visible!==false; }
@@ -498,12 +554,13 @@ function hitTest(pw){
     if(o.shape==='text'){ const tw=(o.props.text||'').length*o.props.size*0.6/view.scale*1; if(lp[0]>=o.x-pad&&lp[0]<=o.x+tw+pad&&lp[1]>=o.y-o.props.size/view.scale-pad&&lp[1]<=o.y+pad) return o; continue; }
     if(lp[0]>=b.x-pad&&lp[0]<=b.x+b.w+pad&&lp[1]>=b.y-pad&&lp[1]<=b.y+b.h+pad) return o; }
   for(let i=objs.length-1;i>=0;i--){ const o=objs[i]; if(o.type!=='path') continue;
-    for(let k=1;k<o.pts.length;k++) if(distToSeg(pw,o.pts[k-1],o.pts[k])<=tol+(KIND_STYLE[o.kind]?.width||2)/2/view.scale) return o; }
+    const g=geomPts(o), half=(o.props&&o.props.width)? o.props.width/2 : (KIND_STYLE[o.kind]?.width||2)/2/view.scale;   // wide runs hit across their real width
+    for(let k=1;k<g.length;k++) if(distToSeg(pw,g[k-1],g[k])<=tol+half) return o; }
   // polygons: smallest area containing point wins; yard last
   let best=null, bestA=Infinity;
   for(const o of objs){ if(o.type!=='poly') continue;
-    let hit=pointInPoly(pw,o.pts); if(!hit){ for(let k=0;k<o.pts.length;k++) if(distToSeg(pw,o.pts[k],o.pts[(k+1)%o.pts.length])<=tol){hit=true;break;} }
-    if(hit){ const a=polyArea(o.pts)*(o.kind==='yard'?1e6:1); if(a<bestA){bestA=a;best=o;} } }
+    const g=geomPts(o); let hit=pointInPoly(pw,g); if(!hit){ for(let k=0;k<g.length;k++) if(distToSeg(pw,g[k],g[(k+1)%g.length])<=tol){hit=true;break;} }
+    if(hit){ const a=polyArea(g)*(o.kind==='yard'?1e6:1); if(a<bestA){bestA=a;best=o;} } }
   return best;
 }
 function handleHit(o, pw){ // returns {type:'vertex',i} | {type:'mid',i} | {type:'resize'} | null
@@ -571,23 +628,50 @@ function label(text, sp, opts={}){ // screen point
 function drawObj(o, selected){
   const st = KIND_STYLE[o.kind]||{stroke:'#333',width:1,fill:'rgba(0,0,0,.05)'};
   if(o.type==='poly'){
-    const sp=o.pts.map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath();
+    const sp=geomPts(o).map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath();
     ctx.fillStyle= st.fill||'transparent'; ctx.fill();
     if(st.hatch){ ctx.save(); ctx.clip(); ctx.strokeStyle=st.hatch; ctx.lineWidth=1; const b=objBounds(o); const step=(o.kind==='paver'?(PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]).w:12)*view.scale; if(step>4){ const s0=w2s([b.x0,b.y0]), s1=w2s([b.x1,b.y1]); for(let x=s0[0];x<=s1[0];x+=step){ctx.beginPath();ctx.moveTo(x,s0[1]);ctx.lineTo(x,s1[1]);ctx.stroke();} if(o.kind==='paver'){const ph=(PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]).h*view.scale; for(let y=s0[1];y<=s1[1];y+=ph){ctx.beginPath();ctx.moveTo(s0[0],y);ctx.lineTo(s1[0],y);ctx.stroke();}} } ctx.restore(); }
     if(st.dots){ ctx.save(); ctx.clip(); ctx.fillStyle=st.dots; const b=objBounds(o); const step=8*view.scale; if(step>5){ const s0=w2s([b.x0,b.y0]), s1=w2s([b.x1,b.y1]); let r=0; for(let y=s0[1];y<=s1[1];y+=step,r++) for(let x=s0[0]+(r%2)*step/2;x<=s1[0];x+=step){ ctx.beginPath(); ctx.arc(x,y,1.5,0,7); ctx.fill(); } } ctx.restore(); }
     ctx.setLineDash(st.dash||[]); ctx.strokeStyle= selected?'#4fa3ff':st.stroke; ctx.lineWidth=(st.width||1)+(selected?1:0); ctx.stroke(); ctx.setLineDash([]);
-    if(ui.showDims){ dimEdges(o.pts, true, o.kind==='yard'||selected); const c=w2s(polyCentroid(o.pts)); const nm=o.name.replace(' outline',''); label(nm, [c[0],c[1]-7], {bold:true, size:12}); label(fmtArea(polyArea(o.pts))+(o.kind==='rock'?' · '+o.props.depth+'" deep':''), [c[0],c[1]+7], {color:'#444'}); if(o.kind==='yard') label('perimeter '+fmtLen(pathLen(o.pts.concat([o.pts[0]]))), [c[0],c[1]+20], {color:'#666'}); }
+    if(ui.showDims){ dimEdges(o.pts, true, o.kind==='yard'||selected, o); const c=w2s(polyCentroid(geomPts(o))); const nm=o.name.replace(' outline',''); label(nm, [c[0],c[1]-7], {bold:true, size:12}); label(fmtArea(objArea(o))+(o.kind==='rock'?' · '+o.props.depth+'" deep':''), [c[0],c[1]+7], {color:'#444'}); if(o.kind==='yard') label('perimeter '+fmtLen(objPerim(o)), [c[0],c[1]+20], {color:'#666'}); }
   } else if(o.type==='path'){
-    const sp=o.pts.map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
+    const sp=geomPts(o).map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
     ctx.setLineDash(st.dash||[]); ctx.lineCap='round'; ctx.lineJoin='round';
-    ctx.strokeStyle= selected?'#4fa3ff':st.stroke; ctx.lineWidth= o.kind==='trench'? Math.max(4,o.props.width*view.scale) : (st.width||2)+(selected?1:0); ctx.stroke(); ctx.setLineDash([]);
+    if(WALK_KINDS.has(o.kind)){ drawWalkPath(o, sp, selected, st); }
+    else { ctx.strokeStyle= selected?'#4fa3ff':st.stroke; ctx.lineWidth= o.kind==='trench'? Math.max(4,o.props.width*view.scale) : (st.width||2)+(selected?1:0); ctx.stroke(); } ctx.setLineDash([]);
     if(o.kind==='fence'){ ctx.fillStyle=st.stroke; sp.forEach(p=>{ctx.beginPath();ctx.arc(p[0],p[1],3,0,7);ctx.fill();}); }
     if(o.kind==='conduit'){ // mark fittings at bends
       const f=conduitFittings(o); ctx.fillStyle='#e65100'; f.bends.forEach(b=>{ const p=w2s(o.pts[b.i]); ctx.beginPath(); ctx.arc(p[0],p[1],4,0,7); ctx.fill(); label(b.label, [p[0]+6,p[1]-6], {align:'left', size:10, color:'#e65100'}); }); }
-    if(ui.showDims){ if(selected) dimEdges(o.pts,false,true); const e=sp[sp.length-1]; label(o.name.split(' (')[0]+' '+fmtLen(pathLen(o.pts)), [e[0]+8,e[1]-8], {align:'left', color:st.stroke}); }
+    if(ui.showDims){ if(selected) dimEdges(o.pts,false,true,o); const e=sp[sp.length-1]; label(o.name.split(' (')[0]+' '+fmtLen(objLen(o))+(WALK_KINDS.has(o.kind)?' × '+fmtLen(o.props.width):''), [e[0]+8,e[1]-8], {align:'left', color:st.stroke}); }
   } else drawItem(o, selected, st);
 }
-function dimEdges(pts, closed, strong){
+// ---- Walking paths: a wide stroke textured with a screen-space pattern, an edge line, and for stepping
+// stones a paver every props.spacing inches along the curve, rotated to the tangent. ----
+const WALK_KINDS = new Set(['walkrock','walkpaver','walkstep']);
+const _pat = {};
+function walkPattern(kind){
+  if(_pat[kind]) return _pat[kind];
+  const c=document.createElement('canvas'); c.width=c.height=16; const g=c.getContext('2d');
+  if(kind==='walkpaver'){ g.fillStyle='#c9a27a'; g.fillRect(0,0,16,16); g.strokeStyle='#a1887f'; g.lineWidth=1; g.beginPath(); g.moveTo(0,8.5); g.lineTo(16,8.5); g.moveTo(8.5,0); g.lineTo(8.5,8); g.moveTo(0.5,8); g.lineTo(0.5,16); g.stroke(); }
+  else { g.fillStyle='#d9d2c6'; g.fillRect(0,0,16,16); g.fillStyle='#9e968c'; [[3,3,2],[11,5,2.5],[6,11,2],[13,13,1.5],[1,12,1.5]].forEach(([x,y,r])=>{ g.beginPath(); g.arc(x,y,r,0,7); g.fill(); }); }
+  return _pat[kind]=ctx.createPattern(c,'repeat');
+}
+function drawWalkPath(o, sp, selected, st){
+  const w=Math.max(3, o.props.width*view.scale);
+  ctx.strokeStyle= selected? '#4fa3ff' : st.edge; ctx.lineWidth=w+2; ctx.stroke();          // edge line
+  ctx.strokeStyle= walkPattern(o.kind==='walkpaver'?'walkpaver':'walkrock'); ctx.lineWidth=w; ctx.stroke();
+  if(o.kind==='walkstep'){ const pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[1]; const g=geomPts(o); const sp2=o.props.spacing||24;
+    let acc=0, next=sp2/2; const s=view.scale;
+    for(let k=1;k<g.length;k++){ const a=g[k-1], b=g[k], L=dist(a,b); if(!L) continue;
+      while(next<=acc+L){ const t=(next-acc)/L; const x=a[0]+(b[0]-a[0])*t, y=a[1]+(b[1]-a[1])*t; const ang=Math.atan2(b[1]-a[1],b[0]-a[0]);
+        const c=w2s([x,y]); ctx.save(); ctx.translate(c[0],c[1]); ctx.rotate(ang); ctx.fillStyle='#c9a27a'; ctx.strokeStyle='#6d4c41'; ctx.lineWidth=1; ctx.fillRect(-pv.w*s/2,-pv.h*s/2,pv.w*s,pv.h*s); ctx.strokeRect(-pv.w*s/2,-pv.h*s/2,pv.w*s,pv.h*s); ctx.restore(); next+=sp2; }
+      acc+=L; } }
+}
+// Stepping stone count along a path: one every spacing, first at half a spacing in.
+function stoneCount(o){ const L=objLen(o), s=o.props.spacing||24; return L<=0? 0 : Math.floor((L - s/2)/s)+1; }
+function dimEdges(pts, closed, strong, o){
+  if(o && isSmooth(o)){ // label each span with its curved length at the curve's midpoint
+    curveSpans(o).forEach(s=>{ if(s.len*view.scale<24) return; const m=w2s(s.mid); const len=Math.hypot(s.dx,s.dy)||1; const nx=-s.dy/len, ny=s.dx/len; label(fmtLen(s.len), [m[0]+nx*10, m[1]+ny*10], {size:strong?11:10, color:strong?'#1a3d6b':'#555'}); }); return; }
   const n = closed? pts.length : pts.length-1;
   for(let i=0;i<n;i++){ const a=pts[i], b=pts[(i+1)%pts.length]; const L=dist(a,b); if(L*view.scale<24) continue;
     const m=w2s([(a[0]+b[0])/2,(a[1]+b[1])/2]); const dx=b[0]-a[0], dy=b[1]-a[1]; const len=Math.hypot(dx,dy)||1; const nx=-dy/len, ny=dx/len;
@@ -636,12 +720,29 @@ function drawHandles(o){
 }
 function drawDrawing(){
   if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1]), true); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
-  const pts = ui.drawPts.concat(ui.mouseW? [candidatePoint(ui.mouseW, ui.ortho)] : []);
-  const sp=pts.map(w2s); const st=KIND_STYLE[ui.lib.kind]||{stroke:'#333'};
+  const st=KIND_STYLE[ui.lib.kind]||{stroke:'#333'};
+  const mode = ui.lib.tool==='poly'? ui.areaShape : 'poly';
+  const cur = ui.mouseW? candidatePoint(ui.mouseW, ui.ortho) : null;
+  // Rectangle / circle modes: one anchor point placed, the shape follows the cursor.
+  if(mode!=='poly' && ui.drawPts.length===1){
+    const a=ui.drawPts[0]; if(!cur) return;
+    const shape = mode==='rect'? rectPts(a,cur) : circlePts(a[0],a[1],snap(dist(a,cur)));
+    const g = mode==='circle'? curvePts(shape,true) : shape; const sp=g.map(w2s);
+    ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath(); ctx.fillStyle=st.fill||'rgba(0,0,0,.05)'; ctx.fill();
+    ctx.strokeStyle=st.stroke; ctx.lineWidth=2; ctx.setLineDash([6,4]); ctx.stroke(); ctx.setLineDash([]);
+    const c0=w2s(a); ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; ctx.beginPath(); ctx.arc(c0[0],c0[1],6,0,7); ctx.fill(); ctx.stroke();
+    const c=w2s(polyCentroid(g));
+    if(mode==='rect'){ label(fmtLen(Math.abs(cur[0]-a[0]))+' × '+fmtLen(Math.abs(cur[1]-a[1]))+' · '+fmtArea(polyArea(g)), c, {bold:true}); }
+    else { const r=snap(dist(a,cur)); label('r '+fmtLen(r)+' · '+fmtArea(polyArea(g)), c, {bold:true}); }
+    return;
+  }
+  const pts = ui.drawPts.concat(cur? [cur] : []);
+  const smooth = !!(ui.lib.props&&ui.lib.props.smooth) && pts.length>=2;
+  const g = smooth? curvePts(pts, false) : pts; const sp=g.map(w2s);
   ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
   if(ui.lib.tool==='poly' && pts.length>2){ ctx.closePath(); ctx.fillStyle=st.fill||'rgba(0,0,0,.05)'; ctx.fill(); }
-  ctx.strokeStyle=st.stroke; ctx.lineWidth=2; ctx.setLineDash([6,4]); ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; sp.forEach((p,i)=>{ ctx.beginPath(); ctx.arc(p[0],p[1],i===0?6:4,0,7); ctx.fill(); ctx.stroke(); });
+  ctx.strokeStyle=st.stroke; ctx.lineWidth= (ui.lib.props&&ui.lib.props.width)? Math.max(2, ui.lib.props.width*view.scale) : 2; ctx.globalAlpha=(ui.lib.props&&ui.lib.props.width)?.5:1; ctx.setLineDash([6,4]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1;
+  ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; pts.map(w2s).forEach((p,i)=>{ ctx.beginPath(); ctx.arc(p[0],p[1],i===0?6:4,0,7); ctx.fill(); ctx.stroke(); });
   dimEdges(pts, ui.lib.tool==='poly'&&pts.length>2, true);
   if(ui.lib.tool==='poly'&&pts.length>2){ const c=w2s(polyCentroid(pts)); label(fmtArea(polyArea(pts)), c, {bold:true}); }
 }
@@ -668,7 +769,7 @@ function setTool(id, lib){ ui.tool=id; ui.lib=lib||null; ui.drawPts=[]; ui.measu
   document.querySelectorAll('#toolBtns button').forEach(b=>b.classList.toggle('active', b.dataset.id===id && !lib));
   document.querySelectorAll('.libitem').forEach(b=>b.classList.toggle('active', !!lib && b.dataset.id===lib.id));
   $('#canvasWrap').style.cursor = id==='pan'?'grab': id==='select'?'default':'crosshair';
-  $('#hint').textContent = lib? (lib.tool==='poly'? `Drawing ${lib.name}: click grid points, or point the mouse and type a length (30.17) for the next corner. Shift locks 0/45/90°. Click the first point or press Enter to close. Esc cancels.` : lib.tool==='path'? `Drawing ${lib.name}: click points, or point the mouse and type a length for the next one. Shift locks 0/45/90°. Enter or double-click to finish. Esc cancels.` : `Placing ${lib.name}: click to place (repeat). Esc to stop.`) : id==='measure'?'Measure: click two points.': id==='select'?'':'Pan: drag.';
+  $('#hint').textContent = lib? (lib.tool==='poly'? (ui.areaShape==='rect'? `Rectangle ${lib.name}: click one corner, then the opposite corner — or type width x height (30.17x20). Esc cancels.` : ui.areaShape==='circle'? `Circle ${lib.name}: click the centre, then click or type the radius. Esc cancels.` : `Drawing ${lib.name}: click grid points, or point the mouse and type a length (30.17) for the next corner. Shift locks 0/45/90°. Ctrl+Z or Backspace removes the last corner. Click the first point or press Enter to close. Esc cancels.`) : lib.tool==='path'? `Drawing ${lib.name}: click points, or point the mouse and type a length for the next one. Shift locks 0/45/90°. Ctrl+Z or Backspace removes the last point. Enter or double-click to finish. Esc cancels.` : `Placing ${lib.name}: click to place (repeat). Esc to stop.`) : id==='measure'?'Measure: click two points.': id==='select'?'':'Pan: drag.';
   $('#hint').hidden = !$('#hint').textContent; draw(); }
 function buildLeft(){
   $('#toolBtns').innerHTML = TOOLS.map(t=>`<button data-id="${t.id}">${t.name}</button>`).join('');
@@ -678,6 +779,7 @@ function buildLeft(){
     $(sel).innerHTML = LIB[g].map(e=>`<div class="libitem" data-id="${e.id}" title="${esc(e.name)}"><span class="sw ${e.shape==='circle'||e.shape==='plant'?'circle':''}" style="background:${e.color}"></span><span>${e.name}</span>${e.w&&e.kind!=='spoint'?`<span class="dim">${e.kind==='plant'?fmtLen(e.w)+' spread':fmtLen(e.w)+'×'+fmtLen(e.h)}</span>`:''}</div>`).join('');
     $(sel).querySelectorAll('.libitem').forEach(d=> d.onclick=()=>{ const e=libById(d.dataset.id); setTool(e.tool==='item'?'place':'draw', e); });
   }
+  document.querySelectorAll('#areaShape button').forEach(b=>{ b.classList.toggle('active', b.dataset.shape===ui.areaShape); b.onclick=()=>{ ui.areaShape=b.dataset.shape; document.querySelectorAll('#areaShape button').forEach(x=>x.classList.toggle('active',x===b)); ui.drawPts=[]; if(ui.lib&&ui.lib.tool==='poly') setTool('draw', ui.lib); }; });
   document.querySelectorAll('.sec h3').forEach(h=> h.onclick=()=>h.parentElement.classList.toggle('closed'));
   ['libHardscape','libPlants','libLighting'].forEach(id=>$('#'+id).parentElement.classList.add('closed'));
 }
@@ -695,6 +797,11 @@ canvas.addEventListener('mousedown', e=>{
   if(ui.tool==='measure'){ if(!ui.measure||ui.measure.b){ ui.measure={a:gp}; } else { ui.measure.b=gp; } draw(); return; }
   if(ui.tool==='draw'){
     const gp=candidatePoint(pw, e.shiftKey);   // shadows the snapped point above; Shift = ortho
+    if(ui.lib.tool==='poly' && ui.areaShape!=='poly'){   // rectangle / circle: anchor, then the second click finishes
+      if(!ui.drawPts.length){ ui.drawPts.push(gp); draw(); return; }
+      const a=ui.drawPts[0]; if(dist(a,gp)<1) return;
+      commitShape(ui.areaShape==='rect'? rectPts(a,gp) : circlePts(a[0],a[1],snap(dist(a,gp)))); return;
+    }
     if(ui.lib.tool==='poly' && ui.drawPts.length>2 && dist(ui.drawPts[0],gp)<8/view.scale){ finishDraw(); return; }
     const now=Date.now(); if(ui.lib.tool==='path' && now-lastClickT<400 && ui.drawPts.length>=2 && dist(ui.drawPts[ui.drawPts.length-1],gp)===0){ lastClickT=0; finishDraw(); return; } lastClickT=now;
     if(!ui.drawPts.length || dist(ui.drawPts[ui.drawPts.length-1],gp)>0) ui.drawPts.push(gp); draw(); return;
@@ -731,9 +838,10 @@ window.addEventListener('mousemove', e=>{
 });
 window.addEventListener('mouseup', e=>{ if(ui.panning){ui.panning=null;} if(ui.drag){ ui.drag=null; refresh(); } });
 canvas.addEventListener('mouseleave', ()=>{ ui.mouseW=null; draw(); });
-function finishDraw(gapMsg){
+function finishDraw(gapMsg, extra){
   const lib=ui.lib; const pts=ui.drawPts; ui.drawPts=[]; closeLenBox();
-  if(lib.tool==='poly' && pts.length>=3){ pushHist(); if(lib.kind==='yard') state.objects=state.objects.filter(o=>o.kind!=='yard'); const o=makePoly(lib,pts); state.objects.unshift(o); ui.selId=o.id; }
+  if(lib.tool==='poly' && ui.areaShape==='circle' && pts.length===8) extra=Object.assign({smooth:true}, extra||{});
+  if(lib.tool==='poly' && pts.length>=3){ pushHist(); if(lib.kind==='yard') state.objects=state.objects.filter(o=>o.kind!=='yard'); const o=makePoly(lib,pts,extra); state.objects.unshift(o); ui.selId=o.id; }
   else if(lib.tool==='path' && pts.length>=2){ pushHist(); const o=makePath(lib,pts); state.objects.push(o); ui.selId=o.id; }
   if(lib.kind==='yard') setTool('select'); else draw();
   refresh();
@@ -750,9 +858,19 @@ function openLenBox(ch){ const sp=ui.mouse||[40,40]; const W=canvas.width/device
   lenBox.style.left=Math.max(0, Math.min(sp[0]+14, W-104))+'px'; lenBox.style.top=Math.max(0, Math.min(sp[1]+14, H-36))+'px';
   lenBox.value=ch; lenBox.classList.remove('bad'); lenBox.hidden=false; lenBox.focus({preventScroll:true}); lenBox.setSelectionRange(lenBox.value.length,lenBox.value.length); }
 function closeLenBox(){ if(!lenBox.hidden){ lenBox.hidden=true; lenBox.value=''; } }
+// Rectangle / circle shapes finish here: pts is the anchor (corner or centre); extra props ride into makePoly.
+function commitShape(pts, extra){ ui.drawPts=pts; finishDraw(null, extra); }
 function commitLen(ortho){
-  const L=parseLen(lenBox.value); if(isNaN(L)||L<=0){ lenBox.classList.add('bad'); return; }
   const pts=ui.drawPts; if(!pts.length){ closeLenBox(); return; }
+  if(ui.lib.tool==='poly' && ui.areaShape!=='poly'){   // rect: "W x H" (or one number = square); circle: radius
+    const a=pts[0], raw=lenBox.value.toLowerCase().split(/x|×|\*/).map(s=>parseLen(s.trim()));
+    if(raw.some(v=>isNaN(v)||v<=0)){ lenBox.classList.add('bad'); return; }
+    closeLenBox();
+    if(ui.areaShape==='rect'){ const w=raw[0], h=raw[1]??raw[0]; commitShape(rectPts(a,[r2(a[0]+w), r2(a[1]+h)])); }
+    else commitShape(circlePts(a[0],a[1],raw[0]), {smooth:true});
+    return;
+  }
+  const L=parseLen(lenBox.value); if(isNaN(L)||L<=0){ lenBox.classList.add('bad'); return; }
   const last=pts[pts.length-1], a=drawDirection(ortho||ui.ortho);
   const pt=[r2(last[0]+Math.cos(a)*L), r2(last[1]+Math.sin(a)*L)];
   closeLenBox();
@@ -772,11 +890,11 @@ window.addEventListener('keydown', e=>{
   if(ui.tool==='draw' && ui.drawPts.length && !e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.]$/.test(e.key)){ e.preventDefault(); openLenBox(e.key); return; }
   const sel=state.objects.find(o=>o.id===ui.selId);
   if(e.code==='Space'){ ui.space=true; e.preventDefault(); return; }
-  if(e.ctrlKey||e.metaKey){ if(e.key==='z'){undo();e.preventDefault();} else if(e.key==='y'){redo();e.preventDefault();} else if(e.key==='d'&&sel){ e.preventDefault(); duplicateSel(); } return; }
+  if(e.ctrlKey||e.metaKey){ if(e.key==='z'){ if(ui.tool==='draw'&&ui.drawPts.length){ ui.drawPts.pop(); draw(); } else undo(); e.preventDefault(); } else if(e.key==='y'){redo();e.preventDefault();} else if(e.key==='d'&&sel){ e.preventDefault(); duplicateSel(); } return; }
   switch(e.key){
     case 'Escape': if(ui.drawPts.length){ ui.drawPts=[]; draw(); } else if(ui.lib){ setTool('select'); } else { ui.selId=null; ui.measure=null; refresh(); } break;
     case 'Enter': if(ui.tool==='draw') finishDraw(); break;
-    case 'Delete': case 'Backspace': if(sel){ pushHist(); state.objects=state.objects.filter(o=>o!==sel); ui.selId=null; refresh(); } break;
+    case 'Delete': case 'Backspace': if(ui.tool==='draw'&&ui.drawPts.length){ ui.drawPts.pop(); draw(); } else if(sel){ pushHist(); state.objects=state.objects.filter(o=>o!==sel); ui.selId=null; refresh(); } break;
     case 'v': case 'V': setTool('select'); break;
     case 'h': case 'H': setTool('pan'); break;
     case 'm': case 'M': setTool('measure'); break;
@@ -811,10 +929,10 @@ function renderProps(){
     h+=field('Center X', `<input data-len="x" value="${fmtLen(o.x)}">`)+field('Center Y', `<input data-len="y" value="${fmtLen(o.y)}">`);
     if(o.kind==='spoint'){ const bm=benchPoint(); const d=deltaMm(o);
       h+=field('Label', `<input value="${o.props.label}" disabled>`);
-      h+=field('Reading', `<input data-mprop="reading" value="${o.props.reading==null?'':fmtMNum(o.props.reading)}" placeholder="1.235"> <span class="muted" style="font-size:11px;white-space:nowrap">m</span>`);
+      h+=field('Reading', `<input data-mprop="reading" value="${o.props.reading==null?'':fmtReadingNum(o.props.reading)}" placeholder="123.5"> <span class="muted" style="font-size:11px;white-space:nowrap">cm</span>`);
       h+=field('Benchmark', `<input type="checkbox" data-bench ${o.props.bench?'checked':''}>`);
       h+=field('Note', `<input data-prop="note" value="${esc(o.props.note||'')}">`);
-      if(o.props.reading==null) h+=`<div class="note">Rod reading in metres. 1.235, 1.235m, 123.5cm and 1235mm all work.</div>`;
+      if(o.props.reading==null) h+=`<div class="note">Rod reading in cm. 123.5, 123.5cm, 1.235m and 1235mm all work.</div>`;
       else if(o.props.bench) h+=`<div class="note">Benchmark. Every other point shows its height relative to this one.</div>`;
       else if(d==null) h+=`<div class="note">Tick Benchmark on one point to see relative elevation.</div>`;
       else h+=`<div class="note">Δ from ${bm.props.label}: <b>${fmtCm(d)}</b> · ${fmtLen(mmToIn(d))} ${d<0?'lower':d>0?'higher':'level'}</div>`;
@@ -834,17 +952,24 @@ function renderProps(){
     if(['pathlight','spot','well','walllight','stringpost'].includes(o.kind)) h+=field('Watts', `<input type="number" data-numprop="watts" value="${o.props.watts||0}">`);
     if(o.shape==='text'){ h+=field('Text', `<input data-prop="text" value="${esc(o.props.text||'')}">`); h+=field('Size', `<input type="number" data-numprop="size" value="${o.props.size||12}">`); }
   } else {
-    if(o.type==='poly'){ h+=`<div class="note">Area <b>${fmtArea(polyArea(o.pts))}</b> · perimeter ${fmtLen(pathLen(o.pts.concat([o.pts[0]])))} · ${o.pts.length} vertices</div>`;
+    if(o.kind!=='conduit') h+=field('Smooth', `<input type="checkbox" data-boolprop="smooth" ${o.props.smooth?'checked':''}> <span class="muted" style="font-size:11px">curve through the points</span>`);
+    if(o.type==='poly'){ h+=`<div class="note">Area <b>${fmtArea(objArea(o))}</b> · perimeter ${fmtLen(objPerim(o))} · ${o.pts.length} ${isSmooth(o)?'control points':'vertices'}</div>`;
       if(o.kind==='rock') h+=field('Rock depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">${rockCalc(o)}</div>`;
       if(o.kind==='paver') h+=field('Paver size', `<select data-prop="paver">${PAVER_SIZES.map(p=>`<option value="${p.id}" ${p.id===o.props.paver?'selected':''}>${p.id}</option>`).join('')}</select>`)+`<div class="note">≈ ${paverCount(o)} pavers (5% waste)</div>`;
       if(o.kind==='planter') h+=`<div class="note">Planter wall. Place plants inside it from the Plants library; drip line: draw ¼" tubing along it.</div>`;
-    } else { h+=`<div class="note">Length <b>${fmtLen(pathLen(o.pts))}</b> · ${o.pts.length-1} segments</div>`;
+    } else { h+=`<div class="note">Length <b>${fmtLen(objLen(o))}</b> · ${o.pts.length-1} ${isSmooth(o)?'spans':'segments'}${WALK_KINDS.has(o.kind)?' · '+fmtArea(objLen(o)*o.props.width):''}</div>`;
+      if(WALK_KINDS.has(o.kind)){ h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`);
+        if(o.kind!=='walkpaver') h+=field('Rock depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`);
+        if(o.kind!=='walkrock') h+=field('Paver size', `<select data-prop="paver">${PAVER_SIZES.map(p=>`<option value="${p.id}" ${p.id===o.props.paver?'selected':''}>${p.id}</option>`).join('')}</select>`);
+        if(o.kind==='walkstep') h+=field('Spacing', `<input data-lenprop="spacing" value="${fmtLen(o.props.spacing)}">`)+`<div class="note">${stoneCount(o)} stones on centre. Edging both sides: ${fmtLen(objLen(o)*2)}.</div>`;
+        else h+=`<div class="note">${walkNote(o)} Edging both sides: ${fmtLen(objLen(o)*2)}.</div>`; }
       if(o.kind==='conduit'){ const f=conduitFittings(o); h+=`<div class="note">${f.sticks} × 10' sticks · ${f.couplings} couplings · ${f.c90} × 90° sweeps · ${f.c45} × 45° · ${f.c22} × 22.5° · ${f.other} other bends<br>Total bend ${f.totalDeg}° ${f.totalDeg>360?'<span class="bad">— exceeds 360° between pull points: add a junction box / LB</span>':'<span class="ok">— OK (≤360°)</span>'}</div>`; }
-      if(o.kind==='trench') h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`)+field('Depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">Dig volume ≈ ${(pathLen(o.pts)*o.props.width*o.props.depth/46656).toFixed(2)} cu yd</div>`;
+      if(o.kind==='trench') h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`)+field('Depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">Dig volume ≈ ${(objLen(o)*o.props.width*o.props.depth/46656).toFixed(2)} cu yd</div>`;
       if(o.kind==='wire') h+=`<div class="note">Low-voltage: keep total fixture watts under transformer rating; 12-ga wire for runs over ~100 ft.</div>`;
     }
     h+=`<div class="note">Vertices:</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td></tr>`).join('')}</table>`;
     const ne=o.type==='poly'? o.pts.length : o.pts.length-1;
+    if(isSmooth(o)) h+=`<div class="note">Smooth shape — drag the control points to reshape it; span lengths are shown on the canvas.</div>`; else
     h+=`<div class="note">Edges — type a length and the far vertex slides along the edge:</div><table>${Array.from({length:ne},(_,i)=>`<tr><td class="muted">${i+1}→${(i+1)%o.pts.length+1}</td><td><input data-edge="${i}" value="${fmtLen(dist(o.pts[i],o.pts[(i+1)%o.pts.length]))}"></td></tr>`).join('')}</table>`;
   }
   h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'&&o.kind!=='spoint'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
@@ -859,7 +984,7 @@ function renderProps(){
     o.props[i.dataset.numprop]=Math.min(mx,Math.max(mn,v)); commit(); });
   el.querySelectorAll('[data-lenprop]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); o.props[i.dataset.lenprop]=v; if(i.dataset.lenprop==='radius'){ const hs=headSpec(o); o.props.radius=Math.min(hs.rmax*12,Math.max(hs.rmin*12,v)); } commit(); });
   el.querySelectorAll('[data-boolprop]').forEach(i=> i.onchange=()=>{ pushHist(); o.props[i.dataset.boolprop]=i.checked; commit(); });
-  el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtMNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
+  el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtReadingNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
   el.querySelectorAll('[data-bench]').forEach(i=> i.onchange=()=>{ pushHist(); state.objects.forEach(x=>{ if(x.kind==='spoint') x.props.bench=false; }); o.props.bench=i.checked; commit(); }); // exactly one benchmark
   el.querySelectorAll('[data-arc]').forEach(b=> b.onclick=()=>{ pushHist(); o.props.arc=+b.dataset.arc; commit(); });
   el.querySelectorAll('[data-edge]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); const k=+i.dataset.edge, a=o.pts[k], j=(k+1)%o.pts.length, b=o.pts[j]; const L=dist(a,b); if(isNaN(v)||v<=0){ i.value=fmtLen(L); return; } pushHist(); o.pts[j]= L? [r2(a[0]+(b[0]-a[0])*v/L), r2(a[1]+(b[1]-a[1])*v/L)] : [r2(a[0]+v), a[1]]; commit(); });
@@ -870,13 +995,13 @@ function renderProps(){
 // Escapes for BOTH attribute values and element text. mistake.md html-attr-quotes covered
 // attributes only; BOM rows put user-controlled names into element content via innerHTML.
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function rockCalc(o){ const cuyd=polyArea(o.pts)*o.props.depth/46656; return `≈ ${cuyd.toFixed(2)} cu yd ≈ ${(cuyd*1.35).toFixed(2)} tons (≈ ${Math.ceil(cuyd*27/0.5)} × 0.5 cu ft bags)`; }
-function paverCount(o){ const p=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; return Math.ceil(polyArea(o.pts)/(p.w*p.h)*1.05); }
+function rockCalc(o){ const cuyd=objArea(o)*o.props.depth/46656; return `≈ ${cuyd.toFixed(2)} cu yd ≈ ${(cuyd*1.35).toFixed(2)} tons (≈ ${Math.ceil(cuyd*27/0.5)} × 0.5 cu ft bags)`; }
+function paverCount(o){ const p=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; return Math.ceil(objArea(o)/(p.w*p.h)*1.05); }
 function summaryHtml(){
   const yard=state.objects.find(o=>o.kind==='yard'); const lawn=state.objects.filter(o=>o.kind==='lawn'); const heads=state.objects.filter(o=>o.kind==='head');
   let h='<table>';
-  h+=`<tr><td>Yard</td><td class="n">${yard?fmtArea(polyArea(yard.pts)):'<span class="warn">not drawn</span>'}</td></tr>`;
-  h+=`<tr><td>Lawn</td><td class="n">${fmtArea(lawn.reduce((s,o)=>s+polyArea(o.pts),0))}</td></tr>`;
+  h+=`<tr><td>Yard</td><td class="n">${yard?fmtArea(objArea(yard)):'<span class="warn">not drawn</span>'}</td></tr>`;
+  h+=`<tr><td>Lawn</td><td class="n">${fmtArea(lawn.reduce((s,o)=>s+objArea(o),0))}</td></tr>`;
   h+=`<tr><td>Sprinkler heads</td><td class="n">${heads.length} · ${heads.reduce((s,o)=>s+headGpm(o),0).toFixed(1)} GPM total</td></tr>`;
   h+=`<tr><td>Objects</td><td class="n">${state.objects.length}</td></tr></table>`;
   return h;
@@ -894,7 +1019,7 @@ function renderZones(){
   if(heads.length){ const need=Math.max(1,Math.ceil(total/Math.max(usable,0.01))); h+=`<div class="note">Total demand ${total.toFixed(1)} GPM → minimum <b>${need} zone${need>1?'s':''}</b>${need>1?' (the Orbit 50020 timer is 1 zone: add a multi-outlet hose timer or manifold with valves)':' — a single hose-end timer works'}.</div>`; }
   const underPsi=[...new Map(heads.map(o=>headSpec(o)).filter(m=>state.supply.psi<m.psi).map(m=>[m.id,m])).values()];
   if(underPsi.length) h+=`<div class="note bad">Supply is ${state.supply.psi} PSI — below rated pressure for ${underPsi.map(m=>`${m.brand} ${m.name} (needs ≥${m.psi})`).join(', ')}. These heads will fall short of their rated radius and lose uniformity.</div>`;
-  const lawnArea=state.objects.filter(o=>o.kind==='lawn').reduce((s,o)=>s+polyArea(o.pts),0)/144;
+  const lawnArea=state.objects.filter(o=>o.kind==='lawn').reduce((s,o)=>s+objArea(o),0)/144;
   Object.keys(zones).sort((a,b)=>a-b).forEach(z=>{ const Z=zones[z]; const pct=usable?Z.gpm/usable*100:0; const cls=pct>100?'bad':pct>90?'warn':'ok'; const zc=zoneColor(z);
     const precip = Z.heads.length? Z.heads.reduce((s,o)=>s+headSpec(o).precip,0)/Z.heads.length : 0;
     h+=`<div class="zone"><b style="color:${zc}">Zone ${z}</b> · ${Z.heads.length} head${Z.heads.length>1?'s':''} · <b class="${cls}">${Z.gpm.toFixed(2)} GPM</b> (${pct.toFixed(0)}% of limit)<div class="bar"><i style="width:${Math.min(100,pct)}%;background:var(--${cls==='ok'?'ok':cls==='warn'?'warn':'bad'})"></i></div>
@@ -914,28 +1039,32 @@ function computeBom(){
     add('Conduit','conduit-stick','Cantex ¾" Sch 40 PVC conduit, 10 ft stick',st,'ea',`${fmtLen(len)} of runs + 5% waste`); add('Conduit','conduit-coupling','Cantex ¾" PVC coupling',cp,'ea'); add('Conduit','conduit-90','Cantex ¾" 90° sweep elbow',c90,'ea'); add('Conduit','conduit-45','Cantex ¾" 45° elbow',c45,'ea'); add('Conduit','conduit-22','Cantex ¾" 22.5° elbow',c22,'ea'); if(oth) add('Conduit','conduit-other','Non-standard bends (heat-bend or use pull box)',oth,'ea','check angles'); add('Conduit','conduit-adapter','Cantex ¾" terminal/male adapter (2 per run)',cr.length*2,'ea'); add('Conduit','conduit-cement','PVC primer + cement',1,'kit'); if(over) add('Conduit','conduit-jbox','⚠ runs exceeding 360° of bends — add pull box',over,'run'); }
   add('Conduit','conduit-jbox','Cantex PVC junction box 4×4',byKind('jbox').length,'ea'); add('Conduit','conduit-lb','Cantex LB conduit body ¾"',byKind('lb').length,'ea'); add('Conduit','gfci-outlet','In-use GFCI outlet + weatherproof box/cover',byKind('gfci').length,'ea');
   // Irrigation pipe
-  const pr=byKind('pipe'); if(pr.length){ const len=pr.reduce((s,o)=>s+pathLen(o.pts),0); const bends=pr.reduce((s,o)=>s+bendAngles(o.pts).filter(b=>b.deg>2).length,0); add('Irrigation','pipe-ft','½" poly / Blu-Lock tubing (ft)',Math.ceil(len/12*1.1),'ft',`${fmtLen(len)} + 10%`); add('Irrigation','pipe-elbow','½" elbow fittings',bends,'ea'); add('Irrigation','pipe-endcap','½" end caps / auto-drains',pr.length,'ea'); }
+  const pr=byKind('pipe'); if(pr.length){ const len=pr.reduce((s,o)=>s+objLen(o),0); const bends=pr.reduce((s,o)=>s+bendAngles(o.pts).filter(b=>b.deg>2).length,0); add('Irrigation','pipe-ft','½" poly / Blu-Lock tubing (ft)',Math.ceil(len/12*1.1),'ft',`${fmtLen(len)} + 10%`); add('Irrigation','pipe-elbow','½" elbow fittings',bends,'ea'); add('Irrigation','pipe-endcap','½" end caps / auto-drains',pr.length,'ea'); }
   const heads=byKind('head'); const byModel={}; heads.forEach(o=>{const m=headSpec(o); byModel[m.id]=(byModel[m.id]||0)+1;}); Object.entries(byModel).forEach(([id,n])=>{ const m=HEADS.find(h=>h.id===id); add('Irrigation','head-'+id,`#${m.rank} ${m.brand} ${m.name}`,n,'ea'); if(id!=='orbit-gear') add('Irrigation','body-'+id,m.body,n,'ea'); }); if(heads.length) add('Irrigation','pipe-tee','½" tee + swing pipe/riser per head',heads.length,'ea');
   add('Irrigation','timer','Hose-end timer',byKind('timer').length,'ea'); add('Irrigation','manifold','Multi-zone manifold / valves',byKind('manifold').length,'ea'); add('Irrigation','backflow','Vacuum breaker',byKind('backflow').length,'ea'); add('Irrigation','filter','Drip filter + 25 PSI regulator',byKind('filter').length,'ea'); add('Irrigation','valvebox','Valve box',byKind('valvebox').length,'ea'); add('Irrigation','floatvalve','Basin float valve (fountain autofill)',byKind('floatvalve').length,'ea');
-  const dr=byKind('drip'); if(dr.length) add('Irrigation','drip-ft','¼" drip tubing (ft)',Math.ceil(dr.reduce((s,o)=>s+pathLen(o.pts),0)/12*1.1),'ft');
-  const d12=byKind('drip12'); if(d12.length) add('Irrigation','drip12-ft','½" drip main / fill line (ft)',Math.ceil(d12.reduce((s,o)=>s+pathLen(o.pts),0)/12*1.1),'ft');
+  const dr=byKind('drip'); if(dr.length) add('Irrigation','drip-ft','¼" drip tubing (ft)',Math.ceil(dr.reduce((s,o)=>s+objLen(o),0)/12*1.1),'ft');
+  const d12=byKind('drip12'); if(d12.length) add('Irrigation','drip12-ft','½" drip main / fill line (ft)',Math.ceil(d12.reduce((s,o)=>s+objLen(o),0)/12*1.1),'ft');
   const plants=byKind('plant'); const em=plants.reduce((s,o)=>s+(o.props.emitters||0),0); add('Irrigation','emitter','1 GPH drip emitters',em,'ea');
   // Hardscape
-  byKind('rock').forEach(o=>{ const cuyd=polyArea(o.pts)*o.props.depth/46656; add('Hardscape','rock-ton',`Decorative rock — ${o.name} (${fmtArea(polyArea(o.pts))} × ${o.props.depth}")`,+(cuyd*1.35).toFixed(2),'ton',`${cuyd.toFixed(2)} cu yd`); });
-  byKind('paver').forEach(o=>add('Hardscape','paver-unit',`Pavers ${o.props.paver} — ${o.name} (${fmtArea(polyArea(o.pts))})`,paverCount(o),'ea','5% waste'));
+  byKind('rock').forEach(o=>{ const cuyd=objArea(o)*o.props.depth/46656; add('Hardscape','rock-ton',`Decorative rock — ${o.name} (${fmtArea(objArea(o))} × ${o.props.depth}")`,+(cuyd*1.35).toFixed(2),'ton',`${cuyd.toFixed(2)} cu yd`); });
+  byKind('paver').forEach(o=>{ add('Hardscape','paver-unit',`Pavers ${o.props.paver} — ${o.name} (${fmtArea(objArea(o))})`,paverCount(o),'ea','5% waste'); paverBase(add, objArea(o), o.name); });
+  // Walking paths: area = curve length x width
+  byKind('walkrock').forEach(o=>{ const A=objLen(o)*o.props.width, cuyd=A*o.props.depth/46656; add('Hardscape','rock-ton',`River rock path — ${o.name} (${fmtLen(objLen(o))} × ${fmtLen(o.props.width)}, ${o.props.depth}" deep)`,+(cuyd*1.35).toFixed(2),'ton',`${fmtArea(A)} · ${cuyd.toFixed(2)} cu yd`); add('Hardscape','edging-ft','Landscape edging (ft, both sides)',+(objLen(o)*2/12).toFixed(1),'ft'); });
+  byKind('walkpaver').forEach(o=>{ const A=objLen(o)*o.props.width, pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; add('Hardscape','paver-unit',`Pavers ${o.props.paver} — ${o.name} (${fmtLen(objLen(o))} × ${fmtLen(o.props.width)})`,Math.ceil(A/(pv.w*pv.h)*1.05),'ea','5% waste'); paverBase(add, A, o.name); add('Hardscape','edging-ft','Paver edging (ft, both sides)',+(objLen(o)*2/12).toFixed(1),'ft'); });
+  byKind('walkstep').forEach(o=>{ const A=objLen(o)*o.props.width, pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[1], nS=stoneCount(o), rockA=Math.max(0,A-nS*pv.w*pv.h), cuyd=rockA*o.props.depth/46656; add('Hardscape','paver-unit',`Stepping stones ${o.props.paver} — ${o.name} (${fmtLen(o.props.spacing)} o.c.)`,nS,'ea'); add('Hardscape','rock-ton',`River rock between stones — ${o.name} (${o.props.depth}" deep)`,+(cuyd*1.35).toFixed(2),'ton',`${fmtArea(rockA)} · ${cuyd.toFixed(2)} cu yd`); add('Hardscape','edging-ft','Landscape edging (ft, both sides)',+(objLen(o)*2/12).toFixed(1),'ft'); });
   const pu={}; byKind('paverunit').forEach(o=>{const k=fmtLen(o.w)+'×'+fmtLen(o.h); pu[k]=(pu[k]||0)+1;}); Object.entries(pu).forEach(([k,n])=>add('Hardscape','paver-unit','Paver '+k+' (placed singly)',n,'ea'));
-  byKind('patio').forEach(o=>add('Hardscape','patio-sqft',`Patio/concrete — ${o.name}`,+(polyArea(o.pts)/144).toFixed(1),'sq ft'));
-  byKind('planter').forEach(o=>add('Hardscape','fence-ft',`Garden wall — ${o.name}`,+(pathLen(o.pts.concat([o.pts[0]]))/12).toFixed(1),'ft perimeter',fmtArea(polyArea(o.pts))));
+  byKind('patio').forEach(o=>add('Hardscape','patio-sqft',`Patio/concrete — ${o.name}`,+(objArea(o)/144).toFixed(1),'sq ft'));
+  byKind('planter').forEach(o=>add('Hardscape','fence-ft',`Garden wall — ${o.name}`,+(objPerim(o)/12).toFixed(1),'ft perimeter',fmtArea(objArea(o))));
   byKind('fountain').forEach(o=>{ add('Hardscape','fountain',"Hurricane's Eye Spiral Fountain 29\" (349 lb)",1,'ea'); if(o.props.pad) add('Hardscape','fountain-pad',`Fountain base pad ${fmtLen(o.props.padSize)} sq`,1,'ea',`${(o.props.padSize*o.props.padSize/144).toFixed(1)} sq ft`); });
   ['boulder','firepit','raisedbed','furniture','shed','tree','shrub'].forEach(k=>{ const n={}; byKind(k).forEach(o=>{n[o.name]=(n[o.name]||0)+1;}); Object.entries(n).forEach(([nm,c])=>add('Hardscape',k,nm,c,'ea')); });
-  const fe=byKind('fence'); if(fe.length) add('Hardscape','fence-ft','Fence / wall (ft)',+(fe.reduce((s,o)=>s+pathLen(o.pts),0)/12).toFixed(1),'ft');
+  const fe=byKind('fence'); if(fe.length) add('Hardscape','fence-ft','Fence / wall (ft)',+(fe.reduce((s,o)=>s+objLen(o),0)/12).toFixed(1),'ft');
   // Lighting
   ['pathlight','spot','well','walllight','stringpost'].forEach(k=>{ const n=byKind(k).length; if(n) add('Lighting',k,libById(k==='walllight'?'wall':k==='stringpost'?'string':k).name,n,'ea',`${byKind(k).reduce((s,o)=>s+(o.props.watts||0),0)} W`); });
-  const wr=byKind('wire'); if(wr.length) add('Lighting','wire-ft','Low-voltage landscape wire (ft)',Math.ceil(wr.reduce((s,o)=>s+pathLen(o.pts),0)/12*1.1),'ft'); add('Lighting','transformer','LV transformer',byKind('transformer').length,'ea',`load ${O.filter(o=>['pathlight','spot','well','walllight','stringpost'].includes(o.kind)).reduce((s,o)=>s+(o.props.watts||0),0)} W`);
+  const wr=byKind('wire'); if(wr.length) add('Lighting','wire-ft','Low-voltage landscape wire (ft)',Math.ceil(wr.reduce((s,o)=>s+objLen(o),0)/12*1.1),'ft'); add('Lighting','transformer','LV transformer',byKind('transformer').length,'ea',`load ${O.filter(o=>['pathlight','spot','well','walllight','stringpost'].includes(o.kind)).reduce((s,o)=>s+(o.props.watts||0),0)} W`);
   // Plants
   const pc={}; plants.forEach(o=>{ const p=plantSpec(o); pc[p.name]=(pc[p.name]||0)+1; }); Object.entries(pc).forEach(([nm,n])=>add('Plants','plant',nm,n,'ea'));
   // Trench
-  const tr=byKind('trench'); if(tr.length) add('Dig plan','trench-ft','Trench (ft)',+(tr.reduce((s,o)=>s+pathLen(o.pts),0)/12).toFixed(1),'ft',`${tr.reduce((s,o)=>s+pathLen(o.pts)*o.props.width*o.props.depth,0)/46656>0?(tr.reduce((s,o)=>s+pathLen(o.pts)*o.props.width*o.props.depth,0)/46656).toFixed(2)+' cu yd':''}`);
+  const tr=byKind('trench'); if(tr.length) add('Dig plan','trench-ft','Trench (ft)',+(tr.reduce((s,o)=>s+objLen(o),0)/12).toFixed(1),'ft',`${tr.reduce((s,o)=>s+objLen(o)*o.props.width*o.props.depth,0)/46656>0?(tr.reduce((s,o)=>s+objLen(o)*o.props.width*o.props.depth,0)/46656).toFixed(2)+' cu yd':''}`);
   return rows;
 }
 function renderBom(){
@@ -951,10 +1080,10 @@ function renderSurvey(){
   const el=$('#tab-survey'); const pts=surveyPoints();
   if(!pts.length){ el.innerHTML='<div class="note">No survey points yet. Survey / grade → Survey point, then click where you read the rod. Points are labelled A, B, C … Z, AA, AB … and keep their label if you delete another. Enter each reading in Properties and tick Benchmark on one point.</div>'; return; }
   const bm=benchPoint();
-  let h=bm? `<div class="note">Benchmark <b>${bm.props.label}</b>${bm.props.reading!=null?' · reading '+fmtM(bm.props.reading):' <span class="warn">(no reading yet)</span>'}. Δ = benchmark reading − point reading, so positive is higher ground.</div>`
+  let h=bm? `<div class="note">Benchmark <b>${bm.props.label}</b>${bm.props.reading!=null?' · reading '+fmtReading(bm.props.reading):' <span class="warn">(no reading yet)</span>'}. Δ = benchmark reading − point reading, so positive is higher ground.</div>`
           : '<div class="note"><span class="warn">No benchmark.</span> Tick Benchmark on one point in Properties to get relative elevations.</div>';
   h+='<table><tr><th>Pt</th><th class="n">Reading</th><th class="n">Δ cm</th><th class="n">Δ in</th><th>Note</th></tr>';
-  pts.forEach(o=>{ const d=deltaMm(o); h+=`<tr><td><b>${o.props.label}</b>${o.props.bench?' <span class="muted">BM</span>':''}</td><td class="n">${o.props.reading==null?'<span class="muted">—</span>':fmtM(o.props.reading)}</td><td class="n">${d==null?'':fmtCm(d)}</td><td class="n">${d==null?'':fmtLen(mmToIn(d))}</td><td class="muted">${esc(o.props.note||'')}</td></tr>`; });
+  pts.forEach(o=>{ const d=deltaMm(o); h+=`<tr><td><b>${o.props.label}</b>${o.props.bench?' <span class="muted">BM</span>':''}</td><td class="n">${o.props.reading==null?'<span class="muted">—</span>':fmtReading(o.props.reading)}</td><td class="n">${d==null?'':fmtCm(d)}</td><td class="n">${d==null?'':fmtLen(mmToIn(d))}</td><td class="muted">${esc(o.props.note||'')}</td></tr>`; });
   h+='</table>';
   const withD=pts.filter(o=>deltaMm(o)!=null);
   if(withD.length>1){ const hi=withD.reduce((a,b)=>deltaMm(b)>deltaMm(a)?b:a), lo=withD.reduce((a,b)=>deltaMm(b)<deltaMm(a)?b:a); const fall=deltaMm(hi)-deltaMm(lo);
@@ -970,8 +1099,11 @@ function renderSurvey(){
   el.querySelectorAll('[data-slope]').forEach(s=> s.onchange=()=>{ state.slope[s.dataset.slope]=s.value||null; renderSurvey(); autosave(); });
   $('#btnSurveyCsv').onclick=()=>download('survey.csv', surveyCsvText(), 'text/csv');
 }
-function surveyCsvText(){ let s='Point,Reading_m,Delta_cm,Delta_in,X_ft,Y_ft,Benchmark,Note\n'; surveyPoints().forEach(o=>{ const d=deltaMm(o); s+=[o.props.label, o.props.reading==null?'':(o.props.reading/1000).toFixed(3), d==null?'':(d/10).toFixed(1), d==null?'':mmToIn(d).toFixed(2), (o.x/12).toFixed(2), (o.y/12).toFixed(2), o.props.bench?'yes':'', o.props.note||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); return s; }
+function surveyCsvText(){ let s='Point,Reading_cm,Delta_cm,Delta_in,X_ft,Y_ft,Benchmark,Note\n'; surveyPoints().forEach(o=>{ const d=deltaMm(o); s+=[o.props.label, o.props.reading==null?'':(o.props.reading/10).toFixed(1), d==null?'':(d/10).toFixed(1), d==null?'':mmToIn(d).toFixed(2), (o.x/12).toFixed(2), (o.y/12).toFixed(2), o.props.bench?'yes':'', o.props.note||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); return s; }
 
+// Base under pavers: 4" compacted gravel + 1" bedding sand, per sq in of paver area. Same rule for areas and paths.
+function paverBase(add, areaSqIn, name){ add('Hardscape','paver-base-gravel',`Paver base gravel 4" — ${name}`,+(areaSqIn*4/46656).toFixed(2),'cu yd'); add('Hardscape','paver-sand',`Bedding sand 1" — ${name}`,+(areaSqIn*1/46656).toFixed(2),'cu yd'); }
+function walkNote(o){ const A=objLen(o)*o.props.width; if(o.kind==='walkrock'){ const cuyd=A*o.props.depth/46656; return `≈ ${cuyd.toFixed(2)} cu yd ≈ ${(cuyd*1.35).toFixed(2)} tons of rock.`; } const pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; return `≈ ${Math.ceil(A/(pv.w*pv.h)*1.05)} pavers (5% waste) + ${(A*5/46656).toFixed(2)} cu yd base/sand.`; }
 function bomCsv(){ const rows=computeBom(); let s='Category,Item,Qty,Unit,UnitPrice,Ext,Note\n'; rows.forEach(r=>{ const p=state.prices[r.key]??0; s+=[r.cat,r.item,r.qty,r.unit,p,(p*r.qty).toFixed(2),r.note].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); download('backyard-bom.csv', s, 'text/csv'); }
 
 // ================= IO =================

@@ -22,6 +22,7 @@ const ui = {
   selId:null, drag:null, hover:null,
   showGrid:true, snap:true, showDims:true, showArcs:true,
   measure:null, panning:null, space:false,
+  areaShape:'poly',                   // Draw-areas shape switch: poly | rect | circle
   hist:[], redo:[],
 };
 const $ = s=>document.querySelector(s);
@@ -39,7 +40,7 @@ const fmtLen = inches => {
   if(rem>=12){ft++;rem=0;}
   const inStr = rem? (Number.isInteger(rem)?rem:rem.toFixed(2).replace(/0+$/,'').replace(/\.$/,''))+'"' : '';
   let s = ft? ft+"'"+(inStr?'-'+inStr:'') : (inStr||'0"');
-  return (neg?'-':'')+s;
+  return (neg&&s!=='0"'?'-':'')+s;   // never print -0"
 };
 const fmtFt = inches => (inches/12).toFixed(1)+' ft';
 const fmtArea = sqin => (sqin/144).toFixed(1)+' sq ft';
@@ -96,25 +97,36 @@ const headGpm = o => { const h=headSpec(o); const r=o.props.radius/12; return +(
 function alphaLabel(n){ let s=''; n=n+1; while(n>0){ n--; s=String.fromCharCode(65+n%26)+s; n=Math.floor(n/26); } return s; }
 function labelIndex(s){ let n=0; for(const ch of String(s).toUpperCase()) n=n*26+(ch.charCodeAt(0)-64); return n-1; }
 const mmToIn = mm => mm/25.4;
-const fmtM   = mm => (mm/1000).toFixed(3)+' m';
-const fmtMNum= mm => (mm/1000).toFixed(3);
+const fmtReading    = mm => (mm/10).toFixed(1)+' cm';   // rod readings are entered and shown in cm
+const fmtReadingNum = mm => (mm/10).toFixed(1);
 const fmtCm  = (mm, sign=true) => { const v=mm/10; return (sign&&v>0?'+':'')+v.toFixed(1)+' cm'; };
-// Accepts 1.235, 1.235m, 123.5cm, 1235mm (unit defaults to metres). Returns integer mm, or NaN.
-function parseMetric(s){ const m=String(s).trim().toLowerCase().match(/^(-?\d+(?:\.\d+)?)\s*(m|cm|mm)?$/); if(!m) return NaN; const v=parseFloat(m[1]); return Math.round(m[2]==='cm'? v*10 : m[2]==='mm'? v : v*1000); }
+// Accepts 123.5, 123.5cm, 1.235m, 1235mm (unit defaults to cm). Returns integer mm, or NaN.
+function parseMetric(s){ const m=String(s).trim().toLowerCase().match(/^(-?\d+(?:\.\d+)?)\s*(m|cm|mm)?$/); if(!m) return NaN; const v=parseFloat(m[1]); return Math.round(m[2]==='m'? v*1000 : m[2]==='mm'? v : v*10); }
 const benchPoint = () => state.objects.find(o=>o.kind==='spoint'&&o.props.bench);
 // Elevation relative to the benchmark. A higher rod reading means lower ground, so delta = bench - reading.
 function deltaMm(o){ const bm=benchPoint(); if(!bm||bm.props.reading==null||o.props.reading==null) return null; return bm.props.reading-o.props.reading; }
 // Slope needs no benchmark: rise between two points is just the difference of their readings.
 function slopeBetween(A,B){ if(A.props.reading==null||B.props.reading==null) return null; const run=dist([A.x,A.y],[B.x,B.y]); if(!run) return null; const riseMm=A.props.reading-B.props.reading; const riseIn=mmToIn(riseMm); return {run, riseMm, riseIn, pct:riseIn/run*100, inPerFt:riseIn/(run/12)}; }
-function surveyLabel(o){ const L=o.props.label; if(o.props.bench) return L+' BM'; if(o.props.reading==null) return L; const d=deltaMm(o); return L+' '+(d==null? fmtM(o.props.reading) : fmtCm(d)); }
+function surveyLabel(o){ const L=o.props.label; if(o.props.bench) return L+' BM'; if(o.props.reading==null) return L; const d=deltaMm(o); return L+' '+(d==null? fmtReading(o.props.reading) : fmtCm(d)); }
 
 // ================= History / persistence =================
 // Snapshots carry the survey label counter alongside objects so undoing a placement rolls it back.
 const histSnap = () => JSON.stringify({o:state.objects, n:state.nextLabel});
 const histRestore = s => { const j=JSON.parse(s); state.objects=j.o; state.nextLabel=j.n; };
 function pushHist(){ ui.hist.push(histSnap()); if(ui.hist.length>100) ui.hist.shift(); ui.redo.length=0; }
-function undo(){ if(!ui.hist.length) return; ui.redo.push(histSnap()); histRestore(ui.hist.pop()); ui.selId=null; refresh(); }
-function redo(){ if(!ui.redo.length) return; ui.hist.push(histSnap()); histRestore(ui.redo.pop()); ui.selId=null; refresh(); }
+// Describe what a history step changed so undo/redo can say it out loud (nothing should vanish silently).
+function histDiff(before, after, isUndo){
+  const K = isUndo? ['Ctrl+Y brings it back','Ctrl+Y removes it again','Ctrl+Y redoes'] : ['Ctrl+Z brings it back','Ctrl+Z removes it again','Ctrl+Z undoes'];
+  const bId=new Set(before.map(o=>o.id)), aId=new Set(after.map(o=>o.id));
+  const gone=before.filter(o=>!aId.has(o.id)).map(o=>o.name), came=after.filter(o=>!bId.has(o.id)).map(o=>o.name);
+  const list=a=>a.length>3? a.slice(0,3).join(', ')+' +'+(a.length-3)+' more' : a.join(', ');
+  if(gone.length&&!came.length) return 'Removed '+list(gone)+' — '+K[0];
+  if(came.length&&!gone.length) return 'Restored '+list(came)+' — '+K[1];
+  if(gone.length||came.length) return 'Replaced '+list(gone)+' with '+list(came)+' — '+K[2];
+  return (isUndo?'Undid':'Redid')+' last edit — '+K[2];
+}
+function undo(){ if(!ui.hist.length) return; const before=state.objects; ui.redo.push(histSnap()); histRestore(ui.hist.pop()); ui.selId=null; refresh(); notice(histDiff(before, state.objects, true)); }
+function redo(){ if(!ui.redo.length) return; const before=state.objects; ui.hist.push(histSnap()); histRestore(ui.redo.pop()); ui.selId=null; refresh(); notice(histDiff(before, state.objects, false)); }
 let saveTimer=null;
 function autosave(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{ try{ localStorage.setItem('byd.state', JSON.stringify(state)); $('#stSave').textContent='autosaved '+new Date().toLocaleTimeString(); }catch(e){} },400); }
 function loadAutosave(){ try{ const s=localStorage.getItem('byd.state'); if(s){ const st=JSON.parse(s); migrate(st); state=st; return true; } }catch(e){} return false; }
@@ -130,8 +142,38 @@ function migrate(st){
 }
 
 // ================= Object creation =================
-function makePoly(lib, pts){ return {id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: lib.kind==='planter'?{}: {}}; }
-function makePath(lib, pts){ return {id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: lib.kind==='trench'?{width:6,depth:18}:{}}; }
+function makePoly(lib, pts, extra){ return {id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: {}, extra||{})}; }
+function makePath(lib, pts){ return {id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='trench'?{width:6,depth:18}:{})}; }
+// Shape builders for the Draw-areas shape switch. A circle is 8 control points + smooth. Catmull-Rom through
+// points ON a circle runs ~0.5% inside it (1.1% low on area), so the control points are pushed out by
+// CIRCLE_K, computed once from the curve itself, and the drawn curve has the true radius to within 0.05%.
+function circlePts(cx, cy, r, n=8){ const k=n===8? CIRCLE_K : 1; const out=[]; for(let i=0;i<n;i++){ const a=i/n*2*Math.PI; out.push([r2(cx+Math.cos(a)*r*k), r2(cy+Math.sin(a)*r*k)]); } return out; }
+function rectPts(a, b){ return [[a[0],a[1]],[b[0],a[1]],[b[0],b[1]],[a[0],b[1]]]; }
+
+// ---- Smooth curves. Control points stay in o.pts; everything geometric reads geomPts(o). ----
+const CURVE_SEG = 8;   // samples per span
+// Catmull-Rom through pts. Closed shapes wrap; open ones clamp the ends. Returns the dense polyline.
+function curvePts(pts, closed, seg=CURVE_SEG){
+  const N=pts.length; if(N<(closed?3:2)) return pts.slice();
+  const P=i=> closed? pts[((i%N)+N)%N] : pts[Math.max(0,Math.min(N-1,i))];
+  const out=[]; const spans= closed? N : N-1;
+  for(let i=0;i<spans;i++){ const p0=P(i-1),p1=P(i),p2=P(i+1),p3=P(i+2);
+    for(let k=0;k<seg;k++){ const t=k/seg, t2=t*t, t3=t2*t;
+      out.push([ 0.5*((2*p1[0])+(-p0[0]+p2[0])*t+(2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2+(-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+                 0.5*((2*p1[1])+(-p0[1]+p2[1])*t+(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2+(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3) ]); } }
+  if(!closed) out.push(pts[N-1].slice());
+  return out;
+}
+const CIRCLE_K = (()=>{ const raw=[]; for(let i=0;i<8;i++){ const a=i/8*2*Math.PI; raw.push([Math.cos(a),Math.sin(a)]); } return Math.sqrt(Math.PI/polyArea(curvePts(raw,true))); })();
+const isSmooth = o => !!(o.props&&o.props.smooth) && o.kind!=='conduit' && o.pts.length>=(o.type==='poly'?3:2);
+const geomPts  = o => isSmooth(o)? curvePts(o.pts, o.type==='poly') : o.pts;
+const objArea  = o => polyArea(geomPts(o));
+const objLen   = o => pathLen(geomPts(o));                                   // open length
+const objPerim = o => { const g=geomPts(o); return pathLen(g.concat([g[0]])); };
+// Per-span lengths and label anchors for dimension labels on a smooth shape.
+function curveSpans(o){ const g=curvePts(o.pts, o.type==='poly'), closed=o.type==='poly', spans=closed? o.pts.length : o.pts.length-1, out=[];
+  for(let i=0;i<spans;i++){ const seg=g.slice(i*CURVE_SEG, i*CURVE_SEG+CURVE_SEG+1); if(closed&&i===spans-1) seg.push(g[0]); const m=seg[Math.floor(seg.length/2)]; const a=seg[0], b=seg[seg.length-1]; out.push({len:pathLen(seg), mid:m, dx:b[0]-a[0], dy:b[1]-a[1]}); }
+  return out; }
 // ghost=true is the cursor preview: it shows the next label without consuming it.
 function makeItem(lib, x, y, ghost){
   const o={id:uid(), type:'item', kind:lib.kind, layer:lib.layer, name:lib.name, x, y, w:lib.w, h:lib.h, rot:0, shape:lib.shape, color:lib.color, props:Object.assign({}, lib.props||{})};
@@ -146,7 +188,8 @@ function itemBox(o){ // local unrotated box centered at x,y
 function toLocal(o,p){ const a=-o.rot*Math.PI/180, dx=p[0]-o.x, dy=p[1]-o.y; return [o.x+dx*Math.cos(a)-dy*Math.sin(a), o.y+dx*Math.sin(a)+dy*Math.cos(a)]; }
 function objBounds(o){
   if(o.type==='item'){ const r=Math.max(o.w,o.h)/2*(o.kind==='head'?0:1); let rr=r; if(o.kind==='head') rr=Math.max(4,ui.showArcs?o.props.radius:4); if(o.kind==='fountain'&&o.props.pad) rr=Math.max(rr,o.props.padSize/2); return {x0:o.x-rr,y0:o.y-rr,x1:o.x+rr,y1:o.y+rr}; }
-  const xs=o.pts.map(p=>p[0]), ys=o.pts.map(p=>p[1]); return {x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};
+  const g=geomPts(o), xs=g.map(p=>p[0]), ys=g.map(p=>p[1]); const pad=(o.props&&o.props.width)? o.props.width/2 : 0;
+  return {x0:Math.min(...xs)-pad,y0:Math.min(...ys)-pad,x1:Math.max(...xs)+pad,y1:Math.max(...ys)+pad};
 }
 function allBounds(){ if(!state.objects.length) return null; let b={x0:1e9,y0:1e9,x1:-1e9,y1:-1e9}; state.objects.forEach(o=>{const q=objBounds(o); b.x0=Math.min(b.x0,q.x0);b.y0=Math.min(b.y0,q.y0);b.x1=Math.max(b.x1,q.x1);b.y1=Math.max(b.y1,q.y1);}); return b; }
 function objLayerVisible(o){ return state.layers[o.layer]?.visible!==false; }
@@ -162,12 +205,13 @@ function hitTest(pw){
     if(o.shape==='text'){ const tw=(o.props.text||'').length*o.props.size*0.6/view.scale*1; if(lp[0]>=o.x-pad&&lp[0]<=o.x+tw+pad&&lp[1]>=o.y-o.props.size/view.scale-pad&&lp[1]<=o.y+pad) return o; continue; }
     if(lp[0]>=b.x-pad&&lp[0]<=b.x+b.w+pad&&lp[1]>=b.y-pad&&lp[1]<=b.y+b.h+pad) return o; }
   for(let i=objs.length-1;i>=0;i--){ const o=objs[i]; if(o.type!=='path') continue;
-    for(let k=1;k<o.pts.length;k++) if(distToSeg(pw,o.pts[k-1],o.pts[k])<=tol+(KIND_STYLE[o.kind]?.width||2)/2/view.scale) return o; }
+    const g=geomPts(o), half=(o.props&&o.props.width)? o.props.width/2 : (KIND_STYLE[o.kind]?.width||2)/2/view.scale;   // wide runs hit across their real width
+    for(let k=1;k<g.length;k++) if(distToSeg(pw,g[k-1],g[k])<=tol+half) return o; }
   // polygons: smallest area containing point wins; yard last
   let best=null, bestA=Infinity;
   for(const o of objs){ if(o.type!=='poly') continue;
-    let hit=pointInPoly(pw,o.pts); if(!hit){ for(let k=0;k<o.pts.length;k++) if(distToSeg(pw,o.pts[k],o.pts[(k+1)%o.pts.length])<=tol){hit=true;break;} }
-    if(hit){ const a=polyArea(o.pts)*(o.kind==='yard'?1e6:1); if(a<bestA){bestA=a;best=o;} } }
+    const g=geomPts(o); let hit=pointInPoly(pw,g); if(!hit){ for(let k=0;k<g.length;k++) if(distToSeg(pw,g[k],g[(k+1)%g.length])<=tol){hit=true;break;} }
+    if(hit){ const a=polyArea(g)*(o.kind==='yard'?1e6:1); if(a<bestA){bestA=a;best=o;} } }
   return best;
 }
 function handleHit(o, pw){ // returns {type:'vertex',i} | {type:'mid',i} | {type:'resize'} | null
@@ -235,23 +279,50 @@ function label(text, sp, opts={}){ // screen point
 function drawObj(o, selected){
   const st = KIND_STYLE[o.kind]||{stroke:'#333',width:1,fill:'rgba(0,0,0,.05)'};
   if(o.type==='poly'){
-    const sp=o.pts.map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath();
+    const sp=geomPts(o).map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath();
     ctx.fillStyle= st.fill||'transparent'; ctx.fill();
     if(st.hatch){ ctx.save(); ctx.clip(); ctx.strokeStyle=st.hatch; ctx.lineWidth=1; const b=objBounds(o); const step=(o.kind==='paver'?(PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]).w:12)*view.scale; if(step>4){ const s0=w2s([b.x0,b.y0]), s1=w2s([b.x1,b.y1]); for(let x=s0[0];x<=s1[0];x+=step){ctx.beginPath();ctx.moveTo(x,s0[1]);ctx.lineTo(x,s1[1]);ctx.stroke();} if(o.kind==='paver'){const ph=(PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]).h*view.scale; for(let y=s0[1];y<=s1[1];y+=ph){ctx.beginPath();ctx.moveTo(s0[0],y);ctx.lineTo(s1[0],y);ctx.stroke();}} } ctx.restore(); }
     if(st.dots){ ctx.save(); ctx.clip(); ctx.fillStyle=st.dots; const b=objBounds(o); const step=8*view.scale; if(step>5){ const s0=w2s([b.x0,b.y0]), s1=w2s([b.x1,b.y1]); let r=0; for(let y=s0[1];y<=s1[1];y+=step,r++) for(let x=s0[0]+(r%2)*step/2;x<=s1[0];x+=step){ ctx.beginPath(); ctx.arc(x,y,1.5,0,7); ctx.fill(); } } ctx.restore(); }
     ctx.setLineDash(st.dash||[]); ctx.strokeStyle= selected?'#4fa3ff':st.stroke; ctx.lineWidth=(st.width||1)+(selected?1:0); ctx.stroke(); ctx.setLineDash([]);
-    if(ui.showDims){ dimEdges(o.pts, true, o.kind==='yard'||selected); const c=w2s(polyCentroid(o.pts)); const nm=o.name.replace(' outline',''); label(nm, [c[0],c[1]-7], {bold:true, size:12}); label(fmtArea(polyArea(o.pts))+(o.kind==='rock'?' · '+o.props.depth+'" deep':''), [c[0],c[1]+7], {color:'#444'}); if(o.kind==='yard') label('perimeter '+fmtLen(pathLen(o.pts.concat([o.pts[0]]))), [c[0],c[1]+20], {color:'#666'}); }
+    if(ui.showDims){ dimEdges(o.pts, true, o.kind==='yard'||selected, o); const c=w2s(polyCentroid(geomPts(o))); const nm=o.name.replace(' outline',''); label(nm, [c[0],c[1]-7], {bold:true, size:12}); label(fmtArea(objArea(o))+(o.kind==='rock'?' · '+o.props.depth+'" deep':''), [c[0],c[1]+7], {color:'#444'}); if(o.kind==='yard') label('perimeter '+fmtLen(objPerim(o)), [c[0],c[1]+20], {color:'#666'}); }
   } else if(o.type==='path'){
-    const sp=o.pts.map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
+    const sp=geomPts(o).map(w2s); ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
     ctx.setLineDash(st.dash||[]); ctx.lineCap='round'; ctx.lineJoin='round';
-    ctx.strokeStyle= selected?'#4fa3ff':st.stroke; ctx.lineWidth= o.kind==='trench'? Math.max(4,o.props.width*view.scale) : (st.width||2)+(selected?1:0); ctx.stroke(); ctx.setLineDash([]);
+    if(WALK_KINDS.has(o.kind)){ drawWalkPath(o, sp, selected, st); }
+    else { ctx.strokeStyle= selected?'#4fa3ff':st.stroke; ctx.lineWidth= o.kind==='trench'? Math.max(4,o.props.width*view.scale) : (st.width||2)+(selected?1:0); ctx.stroke(); } ctx.setLineDash([]);
     if(o.kind==='fence'){ ctx.fillStyle=st.stroke; sp.forEach(p=>{ctx.beginPath();ctx.arc(p[0],p[1],3,0,7);ctx.fill();}); }
     if(o.kind==='conduit'){ // mark fittings at bends
       const f=conduitFittings(o); ctx.fillStyle='#e65100'; f.bends.forEach(b=>{ const p=w2s(o.pts[b.i]); ctx.beginPath(); ctx.arc(p[0],p[1],4,0,7); ctx.fill(); label(b.label, [p[0]+6,p[1]-6], {align:'left', size:10, color:'#e65100'}); }); }
-    if(ui.showDims){ if(selected) dimEdges(o.pts,false,true); const e=sp[sp.length-1]; label(o.name.split(' (')[0]+' '+fmtLen(pathLen(o.pts)), [e[0]+8,e[1]-8], {align:'left', color:st.stroke}); }
+    if(ui.showDims){ if(selected) dimEdges(o.pts,false,true,o); const e=sp[sp.length-1]; label(o.name.split(' (')[0]+' '+fmtLen(objLen(o))+(WALK_KINDS.has(o.kind)?' × '+fmtLen(o.props.width):''), [e[0]+8,e[1]-8], {align:'left', color:st.stroke}); }
   } else drawItem(o, selected, st);
 }
-function dimEdges(pts, closed, strong){
+// ---- Walking paths: a wide stroke textured with a screen-space pattern, an edge line, and for stepping
+// stones a paver every props.spacing inches along the curve, rotated to the tangent. ----
+const WALK_KINDS = new Set(['walkrock','walkpaver','walkstep']);
+const _pat = {};
+function walkPattern(kind){
+  if(_pat[kind]) return _pat[kind];
+  const c=document.createElement('canvas'); c.width=c.height=16; const g=c.getContext('2d');
+  if(kind==='walkpaver'){ g.fillStyle='#c9a27a'; g.fillRect(0,0,16,16); g.strokeStyle='#a1887f'; g.lineWidth=1; g.beginPath(); g.moveTo(0,8.5); g.lineTo(16,8.5); g.moveTo(8.5,0); g.lineTo(8.5,8); g.moveTo(0.5,8); g.lineTo(0.5,16); g.stroke(); }
+  else { g.fillStyle='#d9d2c6'; g.fillRect(0,0,16,16); g.fillStyle='#9e968c'; [[3,3,2],[11,5,2.5],[6,11,2],[13,13,1.5],[1,12,1.5]].forEach(([x,y,r])=>{ g.beginPath(); g.arc(x,y,r,0,7); g.fill(); }); }
+  return _pat[kind]=ctx.createPattern(c,'repeat');
+}
+function drawWalkPath(o, sp, selected, st){
+  const w=Math.max(3, o.props.width*view.scale);
+  ctx.strokeStyle= selected? '#4fa3ff' : st.edge; ctx.lineWidth=w+2; ctx.stroke();          // edge line
+  ctx.strokeStyle= walkPattern(o.kind==='walkpaver'?'walkpaver':'walkrock'); ctx.lineWidth=w; ctx.stroke();
+  if(o.kind==='walkstep'){ const pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[1]; const g=geomPts(o); const sp2=o.props.spacing||24;
+    let acc=0, next=sp2/2; const s=view.scale;
+    for(let k=1;k<g.length;k++){ const a=g[k-1], b=g[k], L=dist(a,b); if(!L) continue;
+      while(next<=acc+L){ const t=(next-acc)/L; const x=a[0]+(b[0]-a[0])*t, y=a[1]+(b[1]-a[1])*t; const ang=Math.atan2(b[1]-a[1],b[0]-a[0]);
+        const c=w2s([x,y]); ctx.save(); ctx.translate(c[0],c[1]); ctx.rotate(ang); ctx.fillStyle='#c9a27a'; ctx.strokeStyle='#6d4c41'; ctx.lineWidth=1; ctx.fillRect(-pv.w*s/2,-pv.h*s/2,pv.w*s,pv.h*s); ctx.strokeRect(-pv.w*s/2,-pv.h*s/2,pv.w*s,pv.h*s); ctx.restore(); next+=sp2; }
+      acc+=L; } }
+}
+// Stepping stone count along a path: one every spacing, first at half a spacing in.
+function stoneCount(o){ const L=objLen(o), s=o.props.spacing||24; return L<=0? 0 : Math.floor((L - s/2)/s)+1; }
+function dimEdges(pts, closed, strong, o){
+  if(o && isSmooth(o)){ // label each span with its curved length at the curve's midpoint
+    curveSpans(o).forEach(s=>{ if(s.len*view.scale<24) return; const m=w2s(s.mid); const len=Math.hypot(s.dx,s.dy)||1; const nx=-s.dy/len, ny=s.dx/len; label(fmtLen(s.len), [m[0]+nx*10, m[1]+ny*10], {size:strong?11:10, color:strong?'#1a3d6b':'#555'}); }); return; }
   const n = closed? pts.length : pts.length-1;
   for(let i=0;i<n;i++){ const a=pts[i], b=pts[(i+1)%pts.length]; const L=dist(a,b); if(L*view.scale<24) continue;
     const m=w2s([(a[0]+b[0])/2,(a[1]+b[1])/2]); const dx=b[0]-a[0], dy=b[1]-a[1]; const len=Math.hypot(dx,dy)||1; const nx=-dy/len, ny=dx/len;
@@ -300,12 +371,29 @@ function drawHandles(o){
 }
 function drawDrawing(){
   if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1]), true); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
-  const pts = ui.drawPts.concat(ui.mouseW? [candidatePoint(ui.mouseW, ui.ortho)] : []);
-  const sp=pts.map(w2s); const st=KIND_STYLE[ui.lib.kind]||{stroke:'#333'};
+  const st=KIND_STYLE[ui.lib.kind]||{stroke:'#333'};
+  const mode = ui.lib.tool==='poly'? ui.areaShape : 'poly';
+  const cur = ui.mouseW? candidatePoint(ui.mouseW, ui.ortho) : null;
+  // Rectangle / circle modes: one anchor point placed, the shape follows the cursor.
+  if(mode!=='poly' && ui.drawPts.length===1){
+    const a=ui.drawPts[0]; if(!cur) return;
+    const shape = mode==='rect'? rectPts(a,cur) : circlePts(a[0],a[1],snap(dist(a,cur)));
+    const g = mode==='circle'? curvePts(shape,true) : shape; const sp=g.map(w2s);
+    ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath(); ctx.fillStyle=st.fill||'rgba(0,0,0,.05)'; ctx.fill();
+    ctx.strokeStyle=st.stroke; ctx.lineWidth=2; ctx.setLineDash([6,4]); ctx.stroke(); ctx.setLineDash([]);
+    const c0=w2s(a); ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; ctx.beginPath(); ctx.arc(c0[0],c0[1],6,0,7); ctx.fill(); ctx.stroke();
+    const c=w2s(polyCentroid(g));
+    if(mode==='rect'){ label(fmtLen(Math.abs(cur[0]-a[0]))+' × '+fmtLen(Math.abs(cur[1]-a[1]))+' · '+fmtArea(polyArea(g)), c, {bold:true}); }
+    else { const r=snap(dist(a,cur)); label('r '+fmtLen(r)+' · '+fmtArea(polyArea(g)), c, {bold:true}); }
+    return;
+  }
+  const pts = ui.drawPts.concat(cur? [cur] : []);
+  const smooth = !!(ui.lib.props&&ui.lib.props.smooth) && pts.length>=2;
+  const g = smooth? curvePts(pts, false) : pts; const sp=g.map(w2s);
   ctx.beginPath(); sp.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
   if(ui.lib.tool==='poly' && pts.length>2){ ctx.closePath(); ctx.fillStyle=st.fill||'rgba(0,0,0,.05)'; ctx.fill(); }
-  ctx.strokeStyle=st.stroke; ctx.lineWidth=2; ctx.setLineDash([6,4]); ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; sp.forEach((p,i)=>{ ctx.beginPath(); ctx.arc(p[0],p[1],i===0?6:4,0,7); ctx.fill(); ctx.stroke(); });
+  ctx.strokeStyle=st.stroke; ctx.lineWidth= (ui.lib.props&&ui.lib.props.width)? Math.max(2, ui.lib.props.width*view.scale) : 2; ctx.globalAlpha=(ui.lib.props&&ui.lib.props.width)?.5:1; ctx.setLineDash([6,4]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1;
+  ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; pts.map(w2s).forEach((p,i)=>{ ctx.beginPath(); ctx.arc(p[0],p[1],i===0?6:4,0,7); ctx.fill(); ctx.stroke(); });
   dimEdges(pts, ui.lib.tool==='poly'&&pts.length>2, true);
   if(ui.lib.tool==='poly'&&pts.length>2){ const c=w2s(polyCentroid(pts)); label(fmtArea(polyArea(pts)), c, {bold:true}); }
 }

@@ -1,6 +1,6 @@
 <script>
 'use strict';
-const BUILD_ID = '2026.09.14.2';
+const BUILD_ID = '2026.09.14.3';
 const GRID = 6;           // inches
 const FT = 12;
 
@@ -82,6 +82,10 @@ const LIB = {
     {id:'conduit', name:'Cantex ¾" PVC conduit run',        tool:'path', kind:'conduit', layer:'conduit',    color:'#fb8c00'},
     {id:'wire',    name:'Low-voltage lighting wire',        tool:'path', kind:'wire',    layer:'lighting',   color:'#8e24aa'},
     {id:'trench',  name:'Trench',                           tool:'path', kind:'trench',  layer:'trench',     color:'#6d4c41'},
+    // Walking paths: wide runs. width/depth/spacing in inches. smooth:true so they meander by default.
+    {id:'walkrock', name:'River rock path',                 tool:'path', kind:'walkrock', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3, smooth:true}},
+    {id:'walkpaver',name:'Paver path',                      tool:'path', kind:'walkpaver',layer:'hardscape', color:'#c9a27a', props:{width:36, paver:'12x12', smooth:true}},
+    {id:'walkstep', name:'Stepping stones in rock',         tool:'path', kind:'walkstep', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3, spacing:24, paver:'16x16', smooth:true}},
   ],
   irrigation: [
     {id:'head',      name:'Sprinkler head',                     tool:'item', kind:'head',   layer:'irrigation', w:4,  h:4,  shape:'head',   color:'#1e88e5'},
@@ -151,6 +155,9 @@ const KIND_STYLE = {
   conduit:{stroke:'#fb8c00', width:3.5},
   wire:   {stroke:'#8e24aa', width:2, dash:[3,4]},
   trench: {stroke:'rgba(109,76,65,.35)', width:12},
+  walkrock: {stroke:'#8d8d8d', width:3, edge:'#7a7a7a'},
+  walkpaver:{stroke:'#8d6e63', width:3, edge:'#6d4c41'},
+  walkstep: {stroke:'#8d8d8d', width:3, edge:'#7a7a7a'},
 };
 
 const PAVER_SIZES = [{id:'12x12',w:12,h:12},{id:'16x16',w:16,h:16},{id:'24x24',w:24,h:24},{id:'6x9',w:6,h:9},{id:'12x24',w:12,h:24}];
@@ -162,7 +169,7 @@ const DEFAULT_PRICES = {
   'pipe-ft':0.45,'pipe-elbow':2.5,'pipe-tee':2.8,'pipe-endcap':2.0,'timer':45,'manifold':60,'backflow':10,'filter':20,'floatvalve':15,'valvebox':15,
   'drip-ft':0.12,'drip12-ft':0.35,'emitter':0.5,
   'trench-ft':0,'fence-ft':0,
-  'rock-ton':110,'paver-unit':2.5,'patio-sqft':0,'fountain':1755,'fountain-pad':0,'boulder':60,'firepit':0,'raisedbed':0,'furniture':0,'shed':0,'fixed':0,'gate':0,'tree':0,'shrub':0,
+  'rock-ton':110,'paver-unit':2.5,'edging-ft':1.5,'paver-base-gravel':45,'paver-sand':40,'patio-sqft':0,'fountain':1755,'fountain-pad':0,'boulder':60,'firepit':0,'raisedbed':0,'furniture':0,'shed':0,'fixed':0,'gate':0,'tree':0,'shrub':0,
   'wire-ft':0.6,'transformer':80,'pathlight':25,'spot':20,'well':25,'walllight':20,'stringpost':30,
   'plant':8,
 };

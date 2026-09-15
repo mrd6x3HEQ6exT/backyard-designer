@@ -6,7 +6,7 @@ function setTool(id, lib){ ui.tool=id; ui.lib=lib||null; ui.drawPts=[]; ui.measu
   document.querySelectorAll('#toolBtns button').forEach(b=>b.classList.toggle('active', b.dataset.id===id && !lib));
   document.querySelectorAll('.libitem').forEach(b=>b.classList.toggle('active', !!lib && b.dataset.id===lib.id));
   $('#canvasWrap').style.cursor = id==='pan'?'grab': id==='select'?'default':'crosshair';
-  $('#hint').textContent = lib? (lib.tool==='poly'? `Drawing ${lib.name}: click grid points, or point the mouse and type a length (30.17) for the next corner. Shift locks 0/45/90°. Click the first point or press Enter to close. Esc cancels.` : lib.tool==='path'? `Drawing ${lib.name}: click points, or point the mouse and type a length for the next one. Shift locks 0/45/90°. Enter or double-click to finish. Esc cancels.` : `Placing ${lib.name}: click to place (repeat). Esc to stop.`) : id==='measure'?'Measure: click two points.': id==='select'?'':'Pan: drag.';
+  $('#hint').textContent = lib? (lib.tool==='poly'? (ui.areaShape==='rect'? `Rectangle ${lib.name}: click one corner, then the opposite corner — or type width x height (30.17x20). Esc cancels.` : ui.areaShape==='circle'? `Circle ${lib.name}: click the centre, then click or type the radius. Esc cancels.` : `Drawing ${lib.name}: click grid points, or point the mouse and type a length (30.17) for the next corner. Shift locks 0/45/90°. Ctrl+Z or Backspace removes the last corner. Click the first point or press Enter to close. Esc cancels.`) : lib.tool==='path'? `Drawing ${lib.name}: click points, or point the mouse and type a length for the next one. Shift locks 0/45/90°. Ctrl+Z or Backspace removes the last point. Enter or double-click to finish. Esc cancels.` : `Placing ${lib.name}: click to place (repeat). Esc to stop.`) : id==='measure'?'Measure: click two points.': id==='select'?'':'Pan: drag.';
   $('#hint').hidden = !$('#hint').textContent; draw(); }
 function buildLeft(){
   $('#toolBtns').innerHTML = TOOLS.map(t=>`<button data-id="${t.id}">${t.name}</button>`).join('');
@@ -16,6 +16,7 @@ function buildLeft(){
     $(sel).innerHTML = LIB[g].map(e=>`<div class="libitem" data-id="${e.id}" title="${esc(e.name)}"><span class="sw ${e.shape==='circle'||e.shape==='plant'?'circle':''}" style="background:${e.color}"></span><span>${e.name}</span>${e.w&&e.kind!=='spoint'?`<span class="dim">${e.kind==='plant'?fmtLen(e.w)+' spread':fmtLen(e.w)+'×'+fmtLen(e.h)}</span>`:''}</div>`).join('');
     $(sel).querySelectorAll('.libitem').forEach(d=> d.onclick=()=>{ const e=libById(d.dataset.id); setTool(e.tool==='item'?'place':'draw', e); });
   }
+  document.querySelectorAll('#areaShape button').forEach(b=>{ b.classList.toggle('active', b.dataset.shape===ui.areaShape); b.onclick=()=>{ ui.areaShape=b.dataset.shape; document.querySelectorAll('#areaShape button').forEach(x=>x.classList.toggle('active',x===b)); ui.drawPts=[]; if(ui.lib&&ui.lib.tool==='poly') setTool('draw', ui.lib); }; });
   document.querySelectorAll('.sec h3').forEach(h=> h.onclick=()=>h.parentElement.classList.toggle('closed'));
   ['libHardscape','libPlants','libLighting'].forEach(id=>$('#'+id).parentElement.classList.add('closed'));
 }
@@ -33,6 +34,11 @@ canvas.addEventListener('mousedown', e=>{
   if(ui.tool==='measure'){ if(!ui.measure||ui.measure.b){ ui.measure={a:gp}; } else { ui.measure.b=gp; } draw(); return; }
   if(ui.tool==='draw'){
     const gp=candidatePoint(pw, e.shiftKey);   // shadows the snapped point above; Shift = ortho
+    if(ui.lib.tool==='poly' && ui.areaShape!=='poly'){   // rectangle / circle: anchor, then the second click finishes
+      if(!ui.drawPts.length){ ui.drawPts.push(gp); draw(); return; }
+      const a=ui.drawPts[0]; if(dist(a,gp)<1) return;
+      commitShape(ui.areaShape==='rect'? rectPts(a,gp) : circlePts(a[0],a[1],snap(dist(a,gp)))); return;
+    }
     if(ui.lib.tool==='poly' && ui.drawPts.length>2 && dist(ui.drawPts[0],gp)<8/view.scale){ finishDraw(); return; }
     const now=Date.now(); if(ui.lib.tool==='path' && now-lastClickT<400 && ui.drawPts.length>=2 && dist(ui.drawPts[ui.drawPts.length-1],gp)===0){ lastClickT=0; finishDraw(); return; } lastClickT=now;
     if(!ui.drawPts.length || dist(ui.drawPts[ui.drawPts.length-1],gp)>0) ui.drawPts.push(gp); draw(); return;
@@ -69,9 +75,10 @@ window.addEventListener('mousemove', e=>{
 });
 window.addEventListener('mouseup', e=>{ if(ui.panning){ui.panning=null;} if(ui.drag){ ui.drag=null; refresh(); } });
 canvas.addEventListener('mouseleave', ()=>{ ui.mouseW=null; draw(); });
-function finishDraw(gapMsg){
+function finishDraw(gapMsg, extra){
   const lib=ui.lib; const pts=ui.drawPts; ui.drawPts=[]; closeLenBox();
-  if(lib.tool==='poly' && pts.length>=3){ pushHist(); if(lib.kind==='yard') state.objects=state.objects.filter(o=>o.kind!=='yard'); const o=makePoly(lib,pts); state.objects.unshift(o); ui.selId=o.id; }
+  if(lib.tool==='poly' && ui.areaShape==='circle' && pts.length===8) extra=Object.assign({smooth:true}, extra||{});
+  if(lib.tool==='poly' && pts.length>=3){ pushHist(); if(lib.kind==='yard') state.objects=state.objects.filter(o=>o.kind!=='yard'); const o=makePoly(lib,pts,extra); state.objects.unshift(o); ui.selId=o.id; }
   else if(lib.tool==='path' && pts.length>=2){ pushHist(); const o=makePath(lib,pts); state.objects.push(o); ui.selId=o.id; }
   if(lib.kind==='yard') setTool('select'); else draw();
   refresh();
@@ -88,9 +95,19 @@ function openLenBox(ch){ const sp=ui.mouse||[40,40]; const W=canvas.width/device
   lenBox.style.left=Math.max(0, Math.min(sp[0]+14, W-104))+'px'; lenBox.style.top=Math.max(0, Math.min(sp[1]+14, H-36))+'px';
   lenBox.value=ch; lenBox.classList.remove('bad'); lenBox.hidden=false; lenBox.focus({preventScroll:true}); lenBox.setSelectionRange(lenBox.value.length,lenBox.value.length); }
 function closeLenBox(){ if(!lenBox.hidden){ lenBox.hidden=true; lenBox.value=''; } }
+// Rectangle / circle shapes finish here: pts is the anchor (corner or centre); extra props ride into makePoly.
+function commitShape(pts, extra){ ui.drawPts=pts; finishDraw(null, extra); }
 function commitLen(ortho){
-  const L=parseLen(lenBox.value); if(isNaN(L)||L<=0){ lenBox.classList.add('bad'); return; }
   const pts=ui.drawPts; if(!pts.length){ closeLenBox(); return; }
+  if(ui.lib.tool==='poly' && ui.areaShape!=='poly'){   // rect: "W x H" (or one number = square); circle: radius
+    const a=pts[0], raw=lenBox.value.toLowerCase().split(/x|×|\*/).map(s=>parseLen(s.trim()));
+    if(raw.some(v=>isNaN(v)||v<=0)){ lenBox.classList.add('bad'); return; }
+    closeLenBox();
+    if(ui.areaShape==='rect'){ const w=raw[0], h=raw[1]??raw[0]; commitShape(rectPts(a,[r2(a[0]+w), r2(a[1]+h)])); }
+    else commitShape(circlePts(a[0],a[1],raw[0]), {smooth:true});
+    return;
+  }
+  const L=parseLen(lenBox.value); if(isNaN(L)||L<=0){ lenBox.classList.add('bad'); return; }
   const last=pts[pts.length-1], a=drawDirection(ortho||ui.ortho);
   const pt=[r2(last[0]+Math.cos(a)*L), r2(last[1]+Math.sin(a)*L)];
   closeLenBox();
@@ -110,11 +127,11 @@ window.addEventListener('keydown', e=>{
   if(ui.tool==='draw' && ui.drawPts.length && !e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.]$/.test(e.key)){ e.preventDefault(); openLenBox(e.key); return; }
   const sel=state.objects.find(o=>o.id===ui.selId);
   if(e.code==='Space'){ ui.space=true; e.preventDefault(); return; }
-  if(e.ctrlKey||e.metaKey){ if(e.key==='z'){undo();e.preventDefault();} else if(e.key==='y'){redo();e.preventDefault();} else if(e.key==='d'&&sel){ e.preventDefault(); duplicateSel(); } return; }
+  if(e.ctrlKey||e.metaKey){ if(e.key==='z'){ if(ui.tool==='draw'&&ui.drawPts.length){ ui.drawPts.pop(); draw(); } else undo(); e.preventDefault(); } else if(e.key==='y'){redo();e.preventDefault();} else if(e.key==='d'&&sel){ e.preventDefault(); duplicateSel(); } return; }
   switch(e.key){
     case 'Escape': if(ui.drawPts.length){ ui.drawPts=[]; draw(); } else if(ui.lib){ setTool('select'); } else { ui.selId=null; ui.measure=null; refresh(); } break;
     case 'Enter': if(ui.tool==='draw') finishDraw(); break;
-    case 'Delete': case 'Backspace': if(sel){ pushHist(); state.objects=state.objects.filter(o=>o!==sel); ui.selId=null; refresh(); } break;
+    case 'Delete': case 'Backspace': if(ui.tool==='draw'&&ui.drawPts.length){ ui.drawPts.pop(); draw(); } else if(sel){ pushHist(); state.objects=state.objects.filter(o=>o!==sel); ui.selId=null; refresh(); } break;
     case 'v': case 'V': setTool('select'); break;
     case 'h': case 'H': setTool('pan'); break;
     case 'm': case 'M': setTool('measure'); break;
@@ -149,10 +166,10 @@ function renderProps(){
     h+=field('Center X', `<input data-len="x" value="${fmtLen(o.x)}">`)+field('Center Y', `<input data-len="y" value="${fmtLen(o.y)}">`);
     if(o.kind==='spoint'){ const bm=benchPoint(); const d=deltaMm(o);
       h+=field('Label', `<input value="${o.props.label}" disabled>`);
-      h+=field('Reading', `<input data-mprop="reading" value="${o.props.reading==null?'':fmtMNum(o.props.reading)}" placeholder="1.235"> <span class="muted" style="font-size:11px;white-space:nowrap">m</span>`);
+      h+=field('Reading', `<input data-mprop="reading" value="${o.props.reading==null?'':fmtReadingNum(o.props.reading)}" placeholder="123.5"> <span class="muted" style="font-size:11px;white-space:nowrap">cm</span>`);
       h+=field('Benchmark', `<input type="checkbox" data-bench ${o.props.bench?'checked':''}>`);
       h+=field('Note', `<input data-prop="note" value="${esc(o.props.note||'')}">`);
-      if(o.props.reading==null) h+=`<div class="note">Rod reading in metres. 1.235, 1.235m, 123.5cm and 1235mm all work.</div>`;
+      if(o.props.reading==null) h+=`<div class="note">Rod reading in cm. 123.5, 123.5cm, 1.235m and 1235mm all work.</div>`;
       else if(o.props.bench) h+=`<div class="note">Benchmark. Every other point shows its height relative to this one.</div>`;
       else if(d==null) h+=`<div class="note">Tick Benchmark on one point to see relative elevation.</div>`;
       else h+=`<div class="note">Δ from ${bm.props.label}: <b>${fmtCm(d)}</b> · ${fmtLen(mmToIn(d))} ${d<0?'lower':d>0?'higher':'level'}</div>`;
@@ -172,17 +189,24 @@ function renderProps(){
     if(['pathlight','spot','well','walllight','stringpost'].includes(o.kind)) h+=field('Watts', `<input type="number" data-numprop="watts" value="${o.props.watts||0}">`);
     if(o.shape==='text'){ h+=field('Text', `<input data-prop="text" value="${esc(o.props.text||'')}">`); h+=field('Size', `<input type="number" data-numprop="size" value="${o.props.size||12}">`); }
   } else {
-    if(o.type==='poly'){ h+=`<div class="note">Area <b>${fmtArea(polyArea(o.pts))}</b> · perimeter ${fmtLen(pathLen(o.pts.concat([o.pts[0]])))} · ${o.pts.length} vertices</div>`;
+    if(o.kind!=='conduit') h+=field('Smooth', `<input type="checkbox" data-boolprop="smooth" ${o.props.smooth?'checked':''}> <span class="muted" style="font-size:11px">curve through the points</span>`);
+    if(o.type==='poly'){ h+=`<div class="note">Area <b>${fmtArea(objArea(o))}</b> · perimeter ${fmtLen(objPerim(o))} · ${o.pts.length} ${isSmooth(o)?'control points':'vertices'}</div>`;
       if(o.kind==='rock') h+=field('Rock depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">${rockCalc(o)}</div>`;
       if(o.kind==='paver') h+=field('Paver size', `<select data-prop="paver">${PAVER_SIZES.map(p=>`<option value="${p.id}" ${p.id===o.props.paver?'selected':''}>${p.id}</option>`).join('')}</select>`)+`<div class="note">≈ ${paverCount(o)} pavers (5% waste)</div>`;
       if(o.kind==='planter') h+=`<div class="note">Planter wall. Place plants inside it from the Plants library; drip line: draw ¼" tubing along it.</div>`;
-    } else { h+=`<div class="note">Length <b>${fmtLen(pathLen(o.pts))}</b> · ${o.pts.length-1} segments</div>`;
+    } else { h+=`<div class="note">Length <b>${fmtLen(objLen(o))}</b> · ${o.pts.length-1} ${isSmooth(o)?'spans':'segments'}${WALK_KINDS.has(o.kind)?' · '+fmtArea(objLen(o)*o.props.width):''}</div>`;
+      if(WALK_KINDS.has(o.kind)){ h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`);
+        if(o.kind!=='walkpaver') h+=field('Rock depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`);
+        if(o.kind!=='walkrock') h+=field('Paver size', `<select data-prop="paver">${PAVER_SIZES.map(p=>`<option value="${p.id}" ${p.id===o.props.paver?'selected':''}>${p.id}</option>`).join('')}</select>`);
+        if(o.kind==='walkstep') h+=field('Spacing', `<input data-lenprop="spacing" value="${fmtLen(o.props.spacing)}">`)+`<div class="note">${stoneCount(o)} stones on centre. Edging both sides: ${fmtLen(objLen(o)*2)}.</div>`;
+        else h+=`<div class="note">${walkNote(o)} Edging both sides: ${fmtLen(objLen(o)*2)}.</div>`; }
       if(o.kind==='conduit'){ const f=conduitFittings(o); h+=`<div class="note">${f.sticks} × 10' sticks · ${f.couplings} couplings · ${f.c90} × 90° sweeps · ${f.c45} × 45° · ${f.c22} × 22.5° · ${f.other} other bends<br>Total bend ${f.totalDeg}° ${f.totalDeg>360?'<span class="bad">— exceeds 360° between pull points: add a junction box / LB</span>':'<span class="ok">— OK (≤360°)</span>'}</div>`; }
-      if(o.kind==='trench') h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`)+field('Depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">Dig volume ≈ ${(pathLen(o.pts)*o.props.width*o.props.depth/46656).toFixed(2)} cu yd</div>`;
+      if(o.kind==='trench') h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`)+field('Depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">Dig volume ≈ ${(objLen(o)*o.props.width*o.props.depth/46656).toFixed(2)} cu yd</div>`;
       if(o.kind==='wire') h+=`<div class="note">Low-voltage: keep total fixture watts under transformer rating; 12-ga wire for runs over ~100 ft.</div>`;
     }
     h+=`<div class="note">Vertices:</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td></tr>`).join('')}</table>`;
     const ne=o.type==='poly'? o.pts.length : o.pts.length-1;
+    if(isSmooth(o)) h+=`<div class="note">Smooth shape — drag the control points to reshape it; span lengths are shown on the canvas.</div>`; else
     h+=`<div class="note">Edges — type a length and the far vertex slides along the edge:</div><table>${Array.from({length:ne},(_,i)=>`<tr><td class="muted">${i+1}→${(i+1)%o.pts.length+1}</td><td><input data-edge="${i}" value="${fmtLen(dist(o.pts[i],o.pts[(i+1)%o.pts.length]))}"></td></tr>`).join('')}</table>`;
   }
   h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'&&o.kind!=='spoint'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
@@ -197,7 +221,7 @@ function renderProps(){
     o.props[i.dataset.numprop]=Math.min(mx,Math.max(mn,v)); commit(); });
   el.querySelectorAll('[data-lenprop]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); o.props[i.dataset.lenprop]=v; if(i.dataset.lenprop==='radius'){ const hs=headSpec(o); o.props.radius=Math.min(hs.rmax*12,Math.max(hs.rmin*12,v)); } commit(); });
   el.querySelectorAll('[data-boolprop]').forEach(i=> i.onchange=()=>{ pushHist(); o.props[i.dataset.boolprop]=i.checked; commit(); });
-  el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtMNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
+  el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtReadingNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
   el.querySelectorAll('[data-bench]').forEach(i=> i.onchange=()=>{ pushHist(); state.objects.forEach(x=>{ if(x.kind==='spoint') x.props.bench=false; }); o.props.bench=i.checked; commit(); }); // exactly one benchmark
   el.querySelectorAll('[data-arc]').forEach(b=> b.onclick=()=>{ pushHist(); o.props.arc=+b.dataset.arc; commit(); });
   el.querySelectorAll('[data-edge]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); const k=+i.dataset.edge, a=o.pts[k], j=(k+1)%o.pts.length, b=o.pts[j]; const L=dist(a,b); if(isNaN(v)||v<=0){ i.value=fmtLen(L); return; } pushHist(); o.pts[j]= L? [r2(a[0]+(b[0]-a[0])*v/L), r2(a[1]+(b[1]-a[1])*v/L)] : [r2(a[0]+v), a[1]]; commit(); });
@@ -208,13 +232,13 @@ function renderProps(){
 // Escapes for BOTH attribute values and element text. mistake.md html-attr-quotes covered
 // attributes only; BOM rows put user-controlled names into element content via innerHTML.
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function rockCalc(o){ const cuyd=polyArea(o.pts)*o.props.depth/46656; return `≈ ${cuyd.toFixed(2)} cu yd ≈ ${(cuyd*1.35).toFixed(2)} tons (≈ ${Math.ceil(cuyd*27/0.5)} × 0.5 cu ft bags)`; }
-function paverCount(o){ const p=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; return Math.ceil(polyArea(o.pts)/(p.w*p.h)*1.05); }
+function rockCalc(o){ const cuyd=objArea(o)*o.props.depth/46656; return `≈ ${cuyd.toFixed(2)} cu yd ≈ ${(cuyd*1.35).toFixed(2)} tons (≈ ${Math.ceil(cuyd*27/0.5)} × 0.5 cu ft bags)`; }
+function paverCount(o){ const p=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; return Math.ceil(objArea(o)/(p.w*p.h)*1.05); }
 function summaryHtml(){
   const yard=state.objects.find(o=>o.kind==='yard'); const lawn=state.objects.filter(o=>o.kind==='lawn'); const heads=state.objects.filter(o=>o.kind==='head');
   let h='<table>';
-  h+=`<tr><td>Yard</td><td class="n">${yard?fmtArea(polyArea(yard.pts)):'<span class="warn">not drawn</span>'}</td></tr>`;
-  h+=`<tr><td>Lawn</td><td class="n">${fmtArea(lawn.reduce((s,o)=>s+polyArea(o.pts),0))}</td></tr>`;
+  h+=`<tr><td>Yard</td><td class="n">${yard?fmtArea(objArea(yard)):'<span class="warn">not drawn</span>'}</td></tr>`;
+  h+=`<tr><td>Lawn</td><td class="n">${fmtArea(lawn.reduce((s,o)=>s+objArea(o),0))}</td></tr>`;
   h+=`<tr><td>Sprinkler heads</td><td class="n">${heads.length} · ${heads.reduce((s,o)=>s+headGpm(o),0).toFixed(1)} GPM total</td></tr>`;
   h+=`<tr><td>Objects</td><td class="n">${state.objects.length}</td></tr></table>`;
   return h;
@@ -232,7 +256,7 @@ function renderZones(){
   if(heads.length){ const need=Math.max(1,Math.ceil(total/Math.max(usable,0.01))); h+=`<div class="note">Total demand ${total.toFixed(1)} GPM → minimum <b>${need} zone${need>1?'s':''}</b>${need>1?' (the Orbit 50020 timer is 1 zone: add a multi-outlet hose timer or manifold with valves)':' — a single hose-end timer works'}.</div>`; }
   const underPsi=[...new Map(heads.map(o=>headSpec(o)).filter(m=>state.supply.psi<m.psi).map(m=>[m.id,m])).values()];
   if(underPsi.length) h+=`<div class="note bad">Supply is ${state.supply.psi} PSI — below rated pressure for ${underPsi.map(m=>`${m.brand} ${m.name} (needs ≥${m.psi})`).join(', ')}. These heads will fall short of their rated radius and lose uniformity.</div>`;
-  const lawnArea=state.objects.filter(o=>o.kind==='lawn').reduce((s,o)=>s+polyArea(o.pts),0)/144;
+  const lawnArea=state.objects.filter(o=>o.kind==='lawn').reduce((s,o)=>s+objArea(o),0)/144;
   Object.keys(zones).sort((a,b)=>a-b).forEach(z=>{ const Z=zones[z]; const pct=usable?Z.gpm/usable*100:0; const cls=pct>100?'bad':pct>90?'warn':'ok'; const zc=zoneColor(z);
     const precip = Z.heads.length? Z.heads.reduce((s,o)=>s+headSpec(o).precip,0)/Z.heads.length : 0;
     h+=`<div class="zone"><b style="color:${zc}">Zone ${z}</b> · ${Z.heads.length} head${Z.heads.length>1?'s':''} · <b class="${cls}">${Z.gpm.toFixed(2)} GPM</b> (${pct.toFixed(0)}% of limit)<div class="bar"><i style="width:${Math.min(100,pct)}%;background:var(--${cls==='ok'?'ok':cls==='warn'?'warn':'bad'})"></i></div>
@@ -252,28 +276,32 @@ function computeBom(){
     add('Conduit','conduit-stick','Cantex ¾" Sch 40 PVC conduit, 10 ft stick',st,'ea',`${fmtLen(len)} of runs + 5% waste`); add('Conduit','conduit-coupling','Cantex ¾" PVC coupling',cp,'ea'); add('Conduit','conduit-90','Cantex ¾" 90° sweep elbow',c90,'ea'); add('Conduit','conduit-45','Cantex ¾" 45° elbow',c45,'ea'); add('Conduit','conduit-22','Cantex ¾" 22.5° elbow',c22,'ea'); if(oth) add('Conduit','conduit-other','Non-standard bends (heat-bend or use pull box)',oth,'ea','check angles'); add('Conduit','conduit-adapter','Cantex ¾" terminal/male adapter (2 per run)',cr.length*2,'ea'); add('Conduit','conduit-cement','PVC primer + cement',1,'kit'); if(over) add('Conduit','conduit-jbox','⚠ runs exceeding 360° of bends — add pull box',over,'run'); }
   add('Conduit','conduit-jbox','Cantex PVC junction box 4×4',byKind('jbox').length,'ea'); add('Conduit','conduit-lb','Cantex LB conduit body ¾"',byKind('lb').length,'ea'); add('Conduit','gfci-outlet','In-use GFCI outlet + weatherproof box/cover',byKind('gfci').length,'ea');
   // Irrigation pipe
-  const pr=byKind('pipe'); if(pr.length){ const len=pr.reduce((s,o)=>s+pathLen(o.pts),0); const bends=pr.reduce((s,o)=>s+bendAngles(o.pts).filter(b=>b.deg>2).length,0); add('Irrigation','pipe-ft','½" poly / Blu-Lock tubing (ft)',Math.ceil(len/12*1.1),'ft',`${fmtLen(len)} + 10%`); add('Irrigation','pipe-elbow','½" elbow fittings',bends,'ea'); add('Irrigation','pipe-endcap','½" end caps / auto-drains',pr.length,'ea'); }
+  const pr=byKind('pipe'); if(pr.length){ const len=pr.reduce((s,o)=>s+objLen(o),0); const bends=pr.reduce((s,o)=>s+bendAngles(o.pts).filter(b=>b.deg>2).length,0); add('Irrigation','pipe-ft','½" poly / Blu-Lock tubing (ft)',Math.ceil(len/12*1.1),'ft',`${fmtLen(len)} + 10%`); add('Irrigation','pipe-elbow','½" elbow fittings',bends,'ea'); add('Irrigation','pipe-endcap','½" end caps / auto-drains',pr.length,'ea'); }
   const heads=byKind('head'); const byModel={}; heads.forEach(o=>{const m=headSpec(o); byModel[m.id]=(byModel[m.id]||0)+1;}); Object.entries(byModel).forEach(([id,n])=>{ const m=HEADS.find(h=>h.id===id); add('Irrigation','head-'+id,`#${m.rank} ${m.brand} ${m.name}`,n,'ea'); if(id!=='orbit-gear') add('Irrigation','body-'+id,m.body,n,'ea'); }); if(heads.length) add('Irrigation','pipe-tee','½" tee + swing pipe/riser per head',heads.length,'ea');
   add('Irrigation','timer','Hose-end timer',byKind('timer').length,'ea'); add('Irrigation','manifold','Multi-zone manifold / valves',byKind('manifold').length,'ea'); add('Irrigation','backflow','Vacuum breaker',byKind('backflow').length,'ea'); add('Irrigation','filter','Drip filter + 25 PSI regulator',byKind('filter').length,'ea'); add('Irrigation','valvebox','Valve box',byKind('valvebox').length,'ea'); add('Irrigation','floatvalve','Basin float valve (fountain autofill)',byKind('floatvalve').length,'ea');
-  const dr=byKind('drip'); if(dr.length) add('Irrigation','drip-ft','¼" drip tubing (ft)',Math.ceil(dr.reduce((s,o)=>s+pathLen(o.pts),0)/12*1.1),'ft');
-  const d12=byKind('drip12'); if(d12.length) add('Irrigation','drip12-ft','½" drip main / fill line (ft)',Math.ceil(d12.reduce((s,o)=>s+pathLen(o.pts),0)/12*1.1),'ft');
+  const dr=byKind('drip'); if(dr.length) add('Irrigation','drip-ft','¼" drip tubing (ft)',Math.ceil(dr.reduce((s,o)=>s+objLen(o),0)/12*1.1),'ft');
+  const d12=byKind('drip12'); if(d12.length) add('Irrigation','drip12-ft','½" drip main / fill line (ft)',Math.ceil(d12.reduce((s,o)=>s+objLen(o),0)/12*1.1),'ft');
   const plants=byKind('plant'); const em=plants.reduce((s,o)=>s+(o.props.emitters||0),0); add('Irrigation','emitter','1 GPH drip emitters',em,'ea');
   // Hardscape
-  byKind('rock').forEach(o=>{ const cuyd=polyArea(o.pts)*o.props.depth/46656; add('Hardscape','rock-ton',`Decorative rock — ${o.name} (${fmtArea(polyArea(o.pts))} × ${o.props.depth}")`,+(cuyd*1.35).toFixed(2),'ton',`${cuyd.toFixed(2)} cu yd`); });
-  byKind('paver').forEach(o=>add('Hardscape','paver-unit',`Pavers ${o.props.paver} — ${o.name} (${fmtArea(polyArea(o.pts))})`,paverCount(o),'ea','5% waste'));
+  byKind('rock').forEach(o=>{ const cuyd=objArea(o)*o.props.depth/46656; add('Hardscape','rock-ton',`Decorative rock — ${o.name} (${fmtArea(objArea(o))} × ${o.props.depth}")`,+(cuyd*1.35).toFixed(2),'ton',`${cuyd.toFixed(2)} cu yd`); });
+  byKind('paver').forEach(o=>{ add('Hardscape','paver-unit',`Pavers ${o.props.paver} — ${o.name} (${fmtArea(objArea(o))})`,paverCount(o),'ea','5% waste'); paverBase(add, objArea(o), o.name); });
+  // Walking paths: area = curve length x width
+  byKind('walkrock').forEach(o=>{ const A=objLen(o)*o.props.width, cuyd=A*o.props.depth/46656; add('Hardscape','rock-ton',`River rock path — ${o.name} (${fmtLen(objLen(o))} × ${fmtLen(o.props.width)}, ${o.props.depth}" deep)`,+(cuyd*1.35).toFixed(2),'ton',`${fmtArea(A)} · ${cuyd.toFixed(2)} cu yd`); add('Hardscape','edging-ft','Landscape edging (ft, both sides)',+(objLen(o)*2/12).toFixed(1),'ft'); });
+  byKind('walkpaver').forEach(o=>{ const A=objLen(o)*o.props.width, pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; add('Hardscape','paver-unit',`Pavers ${o.props.paver} — ${o.name} (${fmtLen(objLen(o))} × ${fmtLen(o.props.width)})`,Math.ceil(A/(pv.w*pv.h)*1.05),'ea','5% waste'); paverBase(add, A, o.name); add('Hardscape','edging-ft','Paver edging (ft, both sides)',+(objLen(o)*2/12).toFixed(1),'ft'); });
+  byKind('walkstep').forEach(o=>{ const A=objLen(o)*o.props.width, pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[1], nS=stoneCount(o), rockA=Math.max(0,A-nS*pv.w*pv.h), cuyd=rockA*o.props.depth/46656; add('Hardscape','paver-unit',`Stepping stones ${o.props.paver} — ${o.name} (${fmtLen(o.props.spacing)} o.c.)`,nS,'ea'); add('Hardscape','rock-ton',`River rock between stones — ${o.name} (${o.props.depth}" deep)`,+(cuyd*1.35).toFixed(2),'ton',`${fmtArea(rockA)} · ${cuyd.toFixed(2)} cu yd`); add('Hardscape','edging-ft','Landscape edging (ft, both sides)',+(objLen(o)*2/12).toFixed(1),'ft'); });
   const pu={}; byKind('paverunit').forEach(o=>{const k=fmtLen(o.w)+'×'+fmtLen(o.h); pu[k]=(pu[k]||0)+1;}); Object.entries(pu).forEach(([k,n])=>add('Hardscape','paver-unit','Paver '+k+' (placed singly)',n,'ea'));
-  byKind('patio').forEach(o=>add('Hardscape','patio-sqft',`Patio/concrete — ${o.name}`,+(polyArea(o.pts)/144).toFixed(1),'sq ft'));
-  byKind('planter').forEach(o=>add('Hardscape','fence-ft',`Garden wall — ${o.name}`,+(pathLen(o.pts.concat([o.pts[0]]))/12).toFixed(1),'ft perimeter',fmtArea(polyArea(o.pts))));
+  byKind('patio').forEach(o=>add('Hardscape','patio-sqft',`Patio/concrete — ${o.name}`,+(objArea(o)/144).toFixed(1),'sq ft'));
+  byKind('planter').forEach(o=>add('Hardscape','fence-ft',`Garden wall — ${o.name}`,+(objPerim(o)/12).toFixed(1),'ft perimeter',fmtArea(objArea(o))));
   byKind('fountain').forEach(o=>{ add('Hardscape','fountain',"Hurricane's Eye Spiral Fountain 29\" (349 lb)",1,'ea'); if(o.props.pad) add('Hardscape','fountain-pad',`Fountain base pad ${fmtLen(o.props.padSize)} sq`,1,'ea',`${(o.props.padSize*o.props.padSize/144).toFixed(1)} sq ft`); });
   ['boulder','firepit','raisedbed','furniture','shed','tree','shrub'].forEach(k=>{ const n={}; byKind(k).forEach(o=>{n[o.name]=(n[o.name]||0)+1;}); Object.entries(n).forEach(([nm,c])=>add('Hardscape',k,nm,c,'ea')); });
-  const fe=byKind('fence'); if(fe.length) add('Hardscape','fence-ft','Fence / wall (ft)',+(fe.reduce((s,o)=>s+pathLen(o.pts),0)/12).toFixed(1),'ft');
+  const fe=byKind('fence'); if(fe.length) add('Hardscape','fence-ft','Fence / wall (ft)',+(fe.reduce((s,o)=>s+objLen(o),0)/12).toFixed(1),'ft');
   // Lighting
   ['pathlight','spot','well','walllight','stringpost'].forEach(k=>{ const n=byKind(k).length; if(n) add('Lighting',k,libById(k==='walllight'?'wall':k==='stringpost'?'string':k).name,n,'ea',`${byKind(k).reduce((s,o)=>s+(o.props.watts||0),0)} W`); });
-  const wr=byKind('wire'); if(wr.length) add('Lighting','wire-ft','Low-voltage landscape wire (ft)',Math.ceil(wr.reduce((s,o)=>s+pathLen(o.pts),0)/12*1.1),'ft'); add('Lighting','transformer','LV transformer',byKind('transformer').length,'ea',`load ${O.filter(o=>['pathlight','spot','well','walllight','stringpost'].includes(o.kind)).reduce((s,o)=>s+(o.props.watts||0),0)} W`);
+  const wr=byKind('wire'); if(wr.length) add('Lighting','wire-ft','Low-voltage landscape wire (ft)',Math.ceil(wr.reduce((s,o)=>s+objLen(o),0)/12*1.1),'ft'); add('Lighting','transformer','LV transformer',byKind('transformer').length,'ea',`load ${O.filter(o=>['pathlight','spot','well','walllight','stringpost'].includes(o.kind)).reduce((s,o)=>s+(o.props.watts||0),0)} W`);
   // Plants
   const pc={}; plants.forEach(o=>{ const p=plantSpec(o); pc[p.name]=(pc[p.name]||0)+1; }); Object.entries(pc).forEach(([nm,n])=>add('Plants','plant',nm,n,'ea'));
   // Trench
-  const tr=byKind('trench'); if(tr.length) add('Dig plan','trench-ft','Trench (ft)',+(tr.reduce((s,o)=>s+pathLen(o.pts),0)/12).toFixed(1),'ft',`${tr.reduce((s,o)=>s+pathLen(o.pts)*o.props.width*o.props.depth,0)/46656>0?(tr.reduce((s,o)=>s+pathLen(o.pts)*o.props.width*o.props.depth,0)/46656).toFixed(2)+' cu yd':''}`);
+  const tr=byKind('trench'); if(tr.length) add('Dig plan','trench-ft','Trench (ft)',+(tr.reduce((s,o)=>s+objLen(o),0)/12).toFixed(1),'ft',`${tr.reduce((s,o)=>s+objLen(o)*o.props.width*o.props.depth,0)/46656>0?(tr.reduce((s,o)=>s+objLen(o)*o.props.width*o.props.depth,0)/46656).toFixed(2)+' cu yd':''}`);
   return rows;
 }
 function renderBom(){
@@ -289,10 +317,10 @@ function renderSurvey(){
   const el=$('#tab-survey'); const pts=surveyPoints();
   if(!pts.length){ el.innerHTML='<div class="note">No survey points yet. Survey / grade → Survey point, then click where you read the rod. Points are labelled A, B, C … Z, AA, AB … and keep their label if you delete another. Enter each reading in Properties and tick Benchmark on one point.</div>'; return; }
   const bm=benchPoint();
-  let h=bm? `<div class="note">Benchmark <b>${bm.props.label}</b>${bm.props.reading!=null?' · reading '+fmtM(bm.props.reading):' <span class="warn">(no reading yet)</span>'}. Δ = benchmark reading − point reading, so positive is higher ground.</div>`
+  let h=bm? `<div class="note">Benchmark <b>${bm.props.label}</b>${bm.props.reading!=null?' · reading '+fmtReading(bm.props.reading):' <span class="warn">(no reading yet)</span>'}. Δ = benchmark reading − point reading, so positive is higher ground.</div>`
           : '<div class="note"><span class="warn">No benchmark.</span> Tick Benchmark on one point in Properties to get relative elevations.</div>';
   h+='<table><tr><th>Pt</th><th class="n">Reading</th><th class="n">Δ cm</th><th class="n">Δ in</th><th>Note</th></tr>';
-  pts.forEach(o=>{ const d=deltaMm(o); h+=`<tr><td><b>${o.props.label}</b>${o.props.bench?' <span class="muted">BM</span>':''}</td><td class="n">${o.props.reading==null?'<span class="muted">—</span>':fmtM(o.props.reading)}</td><td class="n">${d==null?'':fmtCm(d)}</td><td class="n">${d==null?'':fmtLen(mmToIn(d))}</td><td class="muted">${esc(o.props.note||'')}</td></tr>`; });
+  pts.forEach(o=>{ const d=deltaMm(o); h+=`<tr><td><b>${o.props.label}</b>${o.props.bench?' <span class="muted">BM</span>':''}</td><td class="n">${o.props.reading==null?'<span class="muted">—</span>':fmtReading(o.props.reading)}</td><td class="n">${d==null?'':fmtCm(d)}</td><td class="n">${d==null?'':fmtLen(mmToIn(d))}</td><td class="muted">${esc(o.props.note||'')}</td></tr>`; });
   h+='</table>';
   const withD=pts.filter(o=>deltaMm(o)!=null);
   if(withD.length>1){ const hi=withD.reduce((a,b)=>deltaMm(b)>deltaMm(a)?b:a), lo=withD.reduce((a,b)=>deltaMm(b)<deltaMm(a)?b:a); const fall=deltaMm(hi)-deltaMm(lo);
@@ -308,8 +336,11 @@ function renderSurvey(){
   el.querySelectorAll('[data-slope]').forEach(s=> s.onchange=()=>{ state.slope[s.dataset.slope]=s.value||null; renderSurvey(); autosave(); });
   $('#btnSurveyCsv').onclick=()=>download('survey.csv', surveyCsvText(), 'text/csv');
 }
-function surveyCsvText(){ let s='Point,Reading_m,Delta_cm,Delta_in,X_ft,Y_ft,Benchmark,Note\n'; surveyPoints().forEach(o=>{ const d=deltaMm(o); s+=[o.props.label, o.props.reading==null?'':(o.props.reading/1000).toFixed(3), d==null?'':(d/10).toFixed(1), d==null?'':mmToIn(d).toFixed(2), (o.x/12).toFixed(2), (o.y/12).toFixed(2), o.props.bench?'yes':'', o.props.note||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); return s; }
+function surveyCsvText(){ let s='Point,Reading_cm,Delta_cm,Delta_in,X_ft,Y_ft,Benchmark,Note\n'; surveyPoints().forEach(o=>{ const d=deltaMm(o); s+=[o.props.label, o.props.reading==null?'':(o.props.reading/10).toFixed(1), d==null?'':(d/10).toFixed(1), d==null?'':mmToIn(d).toFixed(2), (o.x/12).toFixed(2), (o.y/12).toFixed(2), o.props.bench?'yes':'', o.props.note||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); return s; }
 
+// Base under pavers: 4" compacted gravel + 1" bedding sand, per sq in of paver area. Same rule for areas and paths.
+function paverBase(add, areaSqIn, name){ add('Hardscape','paver-base-gravel',`Paver base gravel 4" — ${name}`,+(areaSqIn*4/46656).toFixed(2),'cu yd'); add('Hardscape','paver-sand',`Bedding sand 1" — ${name}`,+(areaSqIn*1/46656).toFixed(2),'cu yd'); }
+function walkNote(o){ const A=objLen(o)*o.props.width; if(o.kind==='walkrock'){ const cuyd=A*o.props.depth/46656; return `≈ ${cuyd.toFixed(2)} cu yd ≈ ${(cuyd*1.35).toFixed(2)} tons of rock.`; } const pv=PAVER_SIZES.find(p=>p.id===o.props.paver)||PAVER_SIZES[0]; return `≈ ${Math.ceil(A/(pv.w*pv.h)*1.05)} pavers (5% waste) + ${(A*5/46656).toFixed(2)} cu yd base/sand.`; }
 function bomCsv(){ const rows=computeBom(); let s='Category,Item,Qty,Unit,UnitPrice,Ext,Note\n'; rows.forEach(r=>{ const p=state.prices[r.key]??0; s+=[r.cat,r.item,r.qty,r.unit,p,(p*r.qty).toFixed(2),r.note].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')+'\n'; }); download('backyard-bom.csv', s, 'text/csv'); }
 
 // ================= IO =================

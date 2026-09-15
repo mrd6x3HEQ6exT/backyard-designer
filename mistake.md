@@ -2,8 +2,15 @@ MISTAKE LOG — self-check file, not for human reading. Newest first.
 Standing rule: before any build/code change, grep this file (tags below) as a
 visible tool call. Grep again before shipping. No visible tool call = not done.
 
-TAGS (newest first): focus-scrolls-overflow-hidden > mouse-direction-is-never-exact > trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
+TAGS (newest first): numeric-claim-without-a-test > focus-scrolls-overflow-hidden > mouse-direction-is-never-exact > trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
 
+---
+TAG: numeric-claim-without-a-test
+IF: writing a numeric accuracy claim into a comment, doc or proposal ("within ~0.3%")
+WHAT: wrote that Catmull-Rom through 8 points on a circle is within ~0.3% of the true circle. It is 1.1% low on area (the curve runs inside the circle). The test written against the claim failed.
+WHY: reasoned about it instead of measuring it; the number sounded plausible
+RESULT: one test cycle, and a comment that would have misled the next reader. Fix was better than the claim: CIRCLE_K, computed from the curve at load, makes the drawn circle exact to 0.01%.
+FIX: any number that goes in a comment or doc gets computed first, ideally by the test that guards it. Never publish a tolerance you have not measured.
 ---
 TAG: focus-scrolls-overflow-hidden
 IF: calling focus() on an element positioned inside an overflow:hidden container (#canvasWrap), or any element that may extend past its container's edge
