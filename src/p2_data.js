@@ -1,6 +1,6 @@
 <script>
 'use strict';
-const BUILD_ID = '2026.09.16.1';
+const BUILD_ID = '2026.09.16.2';
 const GRID = 6;           // inches
 const FT = 12;
 
@@ -82,10 +82,10 @@ const LIB = {
     {id:'conduit', name:'Cantex ¾" PVC conduit run',        tool:'path', kind:'conduit', layer:'conduit',    color:'#fb8c00'},
     {id:'wire',    name:'Low-voltage lighting wire',        tool:'path', kind:'wire',    layer:'lighting',   color:'#8e24aa'},
     {id:'trench',  name:'Trench',                           tool:'path', kind:'trench',  layer:'trench',     color:'#6d4c41'},
-    // Walking paths: wide runs. width/depth/spacing in inches. smooth:true so they meander by default.
-    {id:'walkrock', name:'River rock path',                 tool:'path', kind:'walkrock', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3, smooth:true}},
-    {id:'walkpaver',name:'Paver path',                      tool:'path', kind:'walkpaver',layer:'hardscape', color:'#c9a27a', props:{width:36, paver:'12x12', smooth:true}},
-    {id:'walkstep', name:'Stepping stones in rock',         tool:'path', kind:'walkstep', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3, spacing:24, paver:'16x16', smooth:true}},
+    // Walking paths: wide runs. width/depth/spacing in inches. Drawn with square corners; round them with a corner radius.
+    {id:'walkrock', name:'River rock path',                 tool:'path', kind:'walkrock', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3}},
+    {id:'walkpaver',name:'Paver path',                      tool:'path', kind:'walkpaver',layer:'hardscape', color:'#c9a27a', props:{width:36, paver:'12x12'}},
+    {id:'walkstep', name:'Stepping stones in rock',         tool:'path', kind:'walkstep', layer:'hardscape', color:'#b0a090', props:{width:36, depth:3, spacing:24, paver:'16x16'}},
   ],
   irrigation: [
     {id:'head',      name:'Sprinkler head',                     tool:'item', kind:'head',   layer:'irrigation', w:4,  h:4,  shape:'head',   color:'#1e88e5'},

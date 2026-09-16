@@ -2,8 +2,15 @@ MISTAKE LOG — self-check file, not for human reading. Newest first.
 Standing rule: before any build/code change, grep this file (tags below) as a
 visible tool call. Grep again before shipping. No visible tool call = not done.
 
-TAGS (newest first): numeric-claim-without-a-test > focus-scrolls-overflow-hidden > mouse-direction-is-never-exact > trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
+TAGS (newest first): wrong-default-for-the-job > numeric-claim-without-a-test > focus-scrolls-overflow-hidden > mouse-direction-is-never-exact > trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
 
+---
+TAG: wrong-default-for-the-job
+IF: choosing a default behaviour for a drawing tool, or picking which curve model to offer
+WHAT: walking paths were created smooth-by-default (every anchor Catmull-Rom). The owner's real path is straight legs with turns; to get a straight leg he stacked 4 collinear points and fought the + tool, ending with 17 points and drag wobble (y = 220.37 next to 222). Then tangent handles were offered as the fix — a second organic-curve model, when the job needed straight lines and a corner radius.
+WHY: designed for "curves look nice" instead of "how is a path actually laid out": legs + radius, like a road centreline. Never looked at what shape the user was trying to make.
+RESULT: two builds (smooth, then handles) before the right primitive (fillet); an angry user
+FIX: default to the common case (square), make the deviation one gesture (drag ◆ to round). Before choosing a curve model, ask what the user will physically build and what numbers they will stake out — here, corner-to-corner lengths and a radius. Keep the fancy model available, not default.
 ---
 TAG: numeric-claim-without-a-test
 IF: writing a numeric accuracy claim into a comment, doc or proposal ("within ~0.3%")

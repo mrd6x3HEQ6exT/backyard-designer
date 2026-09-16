@@ -311,7 +311,7 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   console.log('\n--- walking paths ---');
   await click('walkrock'); await cw(5 * 12, 55 * 12); await cw(25 * 12, 55 * 12); await page.keyboard.press('Enter');
   const wr = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'walkrock'); const rows = computeBom().filter(r => /River rock path|Landscape edging/.test(r.item)); return { smooth: o.props.smooth, width: o.props.width, len: objLen(o), rows: rows.map(r => [r.key, r.qty, r.unit]) }; });
-  eq([wr.smooth, wr.width, wr.len], [true, 36, 240], 'river rock path: smooth by default, 3 ft wide; a straight 2-point run is 20 ft');
+  eq([wr.smooth, wr.width, wr.len], [null, 36, 240], 'river rock path: square corners by default, 3 ft wide; a straight 2-point run is 20 ft');
   eq(wr.rows, [['rock-ton', 0.75, 'ton'], ['edging-ft', 40, 'ft']], 'BOM: 0.75 ton of rock (20 × 3 ft at 3"), 40 ft of edging');
   await click('walkstep'); await cw(5 * 12, 62 * 12); await cw(25 * 12, 62 * 12); await page.keyboard.press('Enter');   // 7 ft below the rock path: two 3 ft wide runs must not overlap for the hit-test below
   const ws = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'walkstep'); return { stones: stoneCount(o), row: computeBom().find(r => /Stepping stones/.test(r.item)).qty, rock: computeBom().find(r => /rock between stones/.test(r.item)).qty }; });
@@ -322,6 +322,38 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   eq(wp, [['paver-unit', 32], ['paver-base-gravel', 0.37], ['paver-sand', 0.09], ['edging-ft', 20]], 'paver path 10 × 3 ft: 32 pavers (12x12, +5%), 4" gravel + 1" sand base, 20 ft edging');
   const hitWide = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'walkrock'); return hitTest([15 * 12, 55 * 12 + 15]) === o; });
   assert(hitWide, 'a wide path is selectable 15" off its centreline (inside its 36" width)');
+  await page.evaluate(() => { ui.selId = null; refresh(); });
+
+  console.log('\n--- corner radius (fillets), bulk radius, simplify ---');
+  const fl = await page.evaluate(() => { const o = makePoly(libById('area'), rectPts([0, 0], [240, 120])); o.pts.forEach((_, k) => o.hnd[k].r = 24); return { A: objArea(o), P: objPerim(o), r: fillets(o).map(f => f && f.r), expA: 240 * 120 - (4 - Math.PI) * 576, expP: 2 * (240 + 120) - 8 * 24 + 2 * Math.PI * 24 }; });
+  assert(Math.abs(fl.A / fl.expA - 1) < 0.003, '20×10 ft rectangle with 2 ft fillets: area = 20·10 − (4−π)r²  (' + fl.A.toFixed(0) + ' vs ' + fl.expA.toFixed(0) + ' sq in)');
+  assert(Math.abs(fl.P / fl.expP - 1) < 0.003, 'and perimeter = 2(20+10) − 8r + 2πr  (' + fl.P.toFixed(1) + ' vs ' + fl.expP.toFixed(1) + ' in)');
+  eq(fl.r, [24, 24, 24, 24], 'all four corners took the full 2 ft radius');
+  const cl = await page.evaluate(() => { const o = makePoly(libById('area'), rectPts([0, 0], [240, 48])); o.hnd[0].r = 60; return { r: filletAt(o, 0).r, rMax: cornerGeom(o, 0).rMax }; });
+  eq([cl.r, cl.rMax], [24, 24], 'a 5 ft radius on a 4 ft leg clamps to 2 ft — half the short edge');
+  eq(await page.evaluate(() => { const o = makePoly(libById('area'), rectPts([0, 0], [240, 120])); o.hnd[0].r = 24; setNodeType(o, 1, 's'); return filletAt(o, 0); }), null, 'a corner next to a smooth anchor cannot be rounded');
+  await page.click('#areaShape button[data-shape="rect"]');
+  await click('area'); await cw(60 * 12, 5 * 12); await page.keyboard.type('10x8'); await page.keyboard.press('Enter');
+  await page.click('#areaShape button[data-shape="poly"]'); await page.keyboard.press('Escape');
+  const rc2 = await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'area' && x.pts[0][0] === 720); ui.selId = o.id; refresh(); const g = cornerGeom(o, 0); return { P: g.P, bis: g.bis }; });
+  const d0 = await pt(rc2.P[0] + rc2.bis[0] * 11, rc2.P[1] + rc2.bis[1] * 11), d1 = await pt(rc2.P[0] + rc2.bis[0] * 40, rc2.P[1] + rc2.bis[1] * 40);
+  await page.mouse.move(d0[0], d0[1]); await page.mouse.down(); await page.mouse.move(d1[0], d1[1], { steps: 4 }); await page.mouse.up();
+  const rd = await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); return { r: o.hnd[0].r, others: [1, 2, 3].map(k => o.hnd[k].r || 0) }; });
+  assert(rd.r > 0 && rd.r % 6 === 0, 'dragging the ◆ inward rounds that corner, radius snapped to 6" (r = ' + rd.r + ')');
+  eq(rd.others, [0, 0, 0], 'only the dragged corner changed');
+  await page.evaluate(() => { const i = document.querySelector('[data-vr="2"]'); i.value = "3'"; i.dispatchEvent(new Event('change')); });
+  eq(await page.evaluate(() => state.objects.find(x => x.id === ui.selId).hnd[2].r), 36, 'typing r in the Vertices table sets that corner');
+  await page.evaluate(() => { const i = document.querySelector('[data-rall]'); i.value = '2'; i.dispatchEvent(new Event('change')); });
+  eq(await page.evaluate(() => state.objects.find(x => x.id === ui.selId).hnd.map(h => h.r)), [24, 24, 24, 24], 'Corner radius field rounds every corner at once');
+  await click('walkrock'); await cw(50 * 12, 60 * 12); await cw(60 * 12, 60 * 12); await cw(60 * 12, 66 * 12); await page.keyboard.press('Enter'); await page.keyboard.press('Escape');
+  eq(await page.evaluate(() => state.objects.filter(x => x.kind === 'walkrock').pop().hnd.map(h => h.t).join('')), 'ccc', 'walking paths now draw with square corners');
+  const sim = await page.evaluate(() => {
+    // the user's actual river rock path from backyard-design (3).json: 17 points, four collinear, drag wobbles
+    const pts = [[468, 408], [468, 318], [468, 264], [468, 228], [462, 222], [417.1, 221.73], [366, 222], [310.34, 220.37], [264, 222], [240, 222], [240, 208.88], [234, 204], [228, 192], [144, 192], [42, 192], [30, 192], [30, 348]];
+    const o = makePath(libById('walkrock'), pts.map(p => p.slice())); const L0 = objLen(o); const n = simplifyObj(o, 3); return { n, left: o.pts.length, L0, L1: objLen(o) };
+  });
+  assert(sim.n >= 7 && sim.left <= 10, 'Simplify strips the redundant points from the real rock path: 17 → ' + sim.left + ' (removed ' + sim.n + ')');
+  assert(Math.abs(sim.L1 / sim.L0 - 1) < 0.01, 'without changing its length (' + sim.L0.toFixed(1) + ' → ' + sim.L1.toFixed(1) + ' in)');
   await page.evaluate(() => { ui.selId = null; refresh(); });
 
   console.log('\n--- JSON round-trip ---');

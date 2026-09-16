@@ -1,6 +1,6 @@
 # Backyard Designer — project handoff for Claude Code
 
-Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.16.1`.
+Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.16.2`.
 
 ## Working rules (non-negotiable)
 
@@ -21,11 +21,12 @@ src/p1_head.html    HTML skeleton + all CSS + Help tab text
 src/p2_data.js      constants, BUILD_ID, LAYERS, HEADS (sprinkler DB), PLANTS, LIB (object library), KIND_STYLE, PAVER_SIZES, ZONE_COLORS, DEFAULT_PRICES
 src/p3_engine.js    state, view, helpers (fmtLen/parseLen/geometry), history+autosave, object factories, hit-testing, all canvas rendering, conduitFittings()
 src/p4_ui.js        left panel builder, mouse/keyboard handlers, right-panel tabs (Properties/Layers/Zones/BOM), computeBom(), import/export/PNG, init
-test/smoke.js       Playwright end-to-end suite, 110 assertions (scene build, hit-test precedence,
+test/smoke.js       Playwright end-to-end suite, 122 assertions (scene build, hit-test precedence,
                     undo hygiene, vertex drag, conduit fittings, parseLen, zone clamp, PSI warning,
                     BOM escaping, survey labels/deltas/slope/CSV/migrate, typed lengths / ortho /
                     closing gap / edge edit / units toggle, undo-while-drawing, smooth curves,
                     circle/rectangle modes, walking-path BOM, anchors/handles/mirror/reset/insert-on-curve,
+                    corner radius (fillet) geometry/clamp/drag/bulk, simplify on the owner's real path,
                     JSON round-trip, PNG export).
                     Exits non-zero on failure.
 test/syntax.js      Browserless build-integrity + parse check. Exits non-zero on failure.
@@ -73,6 +74,11 @@ Only one `yard` poly is allowed (drawing a new one replaces it; it is `unshift`e
 - Interaction (p4): `handleHit` returns `hout`/`hin` before `vertex` (handles sit near the vertex); dragging a handle stores the raw offset (`r2`, never grid-snapped), Shift = 15° steps, and mirrors the opposite handle to the opposite direction **keeping that handle's own length** unless Alt (`drag.alt`) — Alt makes a cusp. `dblclick` on a vertex flips corner↔smooth; on a handle resets it to auto. Handles are drawn orange (dark = hand-set, light = auto); vertices are squares (corner) or circles (smooth). `handleShown` hides the incoming handle at an open path's first anchor and the outgoing one at its last.
 - Properties: the Smooth checkbox is `[data-allsmooth]` — checked = all smooth, indeterminate = mixed — and sets every anchor at once; the Vertices table has a ○/□ toggle per row (`[data-vt]`); the Edges table gives a typed-length input only on straight spans and shows curved spans read-only. Conduit has none of this and `isSmooth` is always false for it.
 - `curvePts` (plain Catmull-Rom) is retained for `CIRCLE_K` and the drawing preview only.
+
+**Corner radius / fillets (2026.09.16.2)** — the *primary* way to round a path, added after the owner found smooth-by-default unworkable for paths that are mostly straight legs. A corner anchor whose two neighbours are also corners may carry `hnd[k].r` (inches). `cornerGeom(o,k)` gives the edge unit vectors, interior angle θ, bisector and `rMax = ½·min(adjacent edges)·tan(θ/2)` (each fillet may consume at most half of each edge, so two fillets on one leg never overlap). `filletAt(o,k)` clamps `r` to `rMax` and returns the tangent points `T1/T2` (at `r/tan(θ/2)` from the corner), centre (at `r/sin(θ/2)` along the bisector), arc angles, length and midpoint; null if ineligible (open-path end, smooth neighbour, collinear/folded corner). Straight spans now run tangent-point to tangent-point (`spanStart/spanEnd`), and `geomPts` emits each span followed by the arc at its far vertex (`arcPts`, `CURVE_SEG` samples). `isCurved = isSmooth || hasFillet` gates the sampled path. Fillets and smooth anchors never share a vertex; `setNodeType` drops `r`.
+- UI: every eligible corner shows a ◆ — on the arc midpoint when rounded, 11 px inside the corner along the bisector when sharp (`handleHit` type `rad`). Dragging it along the bisector sets `r = d / (1/sin(θ/2) − 1)`, passed through `snap()` (6" when Snap is on), clamped to `rMax`, dropped below 3". Vertices table has an `r` column (`[data-vr]`); Properties has **Corner radius** (`[data-rall]`) applying to every eligible corner; canvas labels `r 3'` on each arc when selected. Dimension labels and the Edges table stay **corner-to-corner** (what you stake out); `objLen/objArea/objPerim` use the true rounded geometry.
+- **Simplify** (`simplifyObj(o, tol=3")`, button in Properties): repeatedly removes the interior corner (r = 0) closest to the line through its neighbours while that distance is under tol. The owner's real 17-point rock path goes to 8 with length within 1%.
+- Walking paths now create with corner anchors (`props.smooth` removed from their LIB entries).
 
 **Shape switch** (`ui.areaShape`: poly | rect | circle, buttons in Draw areas): rect = two clicks or one click + typed `W x H` (`rectPts`); circle = centre click + radius click or typed radius (`circlePts`, 8 points, `{smooth:true}`). `CIRCLE_K` (computed once from the curve) pushes the 8 control points ~0.5% outside the nominal radius so the *drawn* curve has the true radius — area within 0.01% of πr². Both finish through `commitShape → finishDraw(null, extra)`.
 
@@ -144,12 +150,16 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - `ft-in` / `ft.dec` top-bar button toggles every displayed length between `30'-2"` and `30.17 ft`.
 - Place item: click repeatedly; Esc stops. Ghost preview follows cursor.
 - Select: drag = move; drag vertex = reshape; click midpoint "+" = insert vertex (on the curve for curved spans); Alt-click vertex = delete; drag corner square = resize (circles stay round); heads have radius handle (white) and arc handles (orange).
+- Rounding a corner: drag the orange ◆ inside the corner inward (radius snaps to 6"), or type `r` in the Vertices table, or set **Corner radius** for the whole shape. **Simplify** removes points on straight lines.
 - Anchors: double-click a vertex → corner ↔ smooth (also ○/□ in the Vertices table); drag an orange tangent handle to shape the curve (mirrored; Alt = cusp; Shift = 15° steps); double-click a handle → automatic. Smooth checkbox = all anchors at once.
 - Keys: V select, H pan, M measure, Enter finish, Esc cancel/deselect, Del delete, R rotate 15° (Shift+R 90°), Ctrl+D duplicate, Ctrl+Z/Y, G grid, S snap, D dims, F fit, arrows nudge 6" (Shift 12"). **While drawing, Ctrl+Z / Backspace / Delete remove the last point** and never touch app history. App-level undo/redo call `notice(histDiff(...))` — "Removed X — Ctrl+Y brings it back".
 - Length inputs accept `12'6"`, `12' 6`, `12.5` (feet), `150in`, `12ft 6in` (`parseLen`).
 - Top bar: New, Import (JSON), Export (JSON), PNG (prompts px/ft; renders offscreen at that scale with a title block, restores view), BOM CSV, Undo/Redo, Grid/Snap/Dims/Arcs toggles, Fit, Supply GPM/PSI.
 - Survey: Survey / grade → Survey point, click to place (repeat). Properties: reading (m), Benchmark tick, note. Survey tab for the table, high/low, slope and CSV.
 - Right tabs: Properties (context form), Layers (eye/lock), Zones, BOM, Survey, Help.
+
+## Added in 2026.09.16.2
+- Corner radius (fillets) on any square corner: drag the ◆, type r, or set all corners at once. Walking paths draw square. Simplify button. This is the intended way to shape paths; smooth anchors remain for organic beds and circles.
 
 ## Added in 2026.09.16.1
 - Per-anchor corner/smooth with draggable tangent handles (mirrored, Alt for cusps, Shift for 15° steps, double-click to reset). Mixed shapes: straight edges and curves on the same outline. Automatic handles reproduce the previous curves exactly, so existing designs migrate without moving.

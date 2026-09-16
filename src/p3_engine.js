@@ -181,7 +181,7 @@ function ensureHnd(o){
   if(!Array.isArray(o.hnd)) o.hnd=[];
   while(o.hnd.length<o.pts.length) o.hnd.push(def());
   if(o.hnd.length>o.pts.length) o.hnd.length=o.pts.length;
-  o.hnd.forEach((h,k)=>{ if(!h||typeof h!=='object') o.hnd[k]=def(); else { if(h.t!=='s') h.t='c'; if(h.i!=null&&!Array.isArray(h.i)) h.i=null; if(h.o!=null&&!Array.isArray(h.o)) h.o=null; } });
+  o.hnd.forEach((h,k)=>{ if(!h||typeof h!=='object') o.hnd[k]=def(); else { if(h.t!=='s') h.t='c'; if(h.i!=null&&!Array.isArray(h.i)) h.i=null; if(h.o!=null&&!Array.isArray(h.o)) h.o=null; if(!(h.r>0)) delete h.r; } });
   return o;
 }
 const nodeT = (o,k) => (o.hnd&&o.hnd[k]&&o.hnd[k].t)||'c';
@@ -192,24 +192,60 @@ function autoTan(o,k){ const N=o.pts.length, closed=o.type==='poly';
 function handleOut(o,k){ if(nodeT(o,k)!=='s') return [0,0]; const h=o.hnd[k].o; return h||autoTan(o,k); }
 function handleIn(o,k){  if(nodeT(o,k)!=='s') return [0,0]; const h=o.hnd[k].i; if(h) return h; const t=autoTan(o,k); return [-t[0],-t[1]]; }
 const spanStraight = (o,k) => { const N=o.pts.length; return nodeT(o,k)==='c' && nodeT(o,(k+1)%N)==='c'; };
+
+// ---- Corner radius (fillet). A corner anchor whose two neighbours are also corners may carry hnd[k].r:
+// the corner is replaced by a circular arc of that radius tangent to both edges. Smooth anchors and
+// fillets never meet on one vertex, so the two systems stay independent. ----
+function cornerGeom(o,k){ const N=o.pts.length, closed=o.type==='poly'; if(N<3||(!closed&&(k===0||k===N-1))) return null;
+  const kp=(k-1+N)%N, kn=(k+1)%N; if(nodeT(o,k)!=='c'||nodeT(o,kp)!=='c'||nodeT(o,kn)!=='c') return null;
+  const P=o.pts[k], A=o.pts[kp], B=o.pts[kn]; const lp=dist(P,A), ln=dist(P,B); if(lp<1||ln<1) return null;
+  const e1=[(A[0]-P[0])/lp,(A[1]-P[1])/lp], e2=[(B[0]-P[0])/ln,(B[1]-P[1])/ln];
+  const th=Math.acos(Math.max(-1,Math.min(1,e1[0]*e2[0]+e1[1]*e2[1]))); if(th<2*Math.PI/180||th>178*Math.PI/180) return null;   // collinear or folded: nothing to round
+  let bx=e1[0]+e2[0], by=e1[1]+e2[1]; const bl=Math.hypot(bx,by)||1;
+  return {P, e1, e2, lp, ln, theta:th, bis:[bx/bl,by/bl], rMax:r2(0.5*Math.min(lp,ln)*Math.tan(th/2))};   // rMax: each fillet may use half of each adjacent edge
+}
+function filletAt(o,k){ const h=o.hnd&&o.hnd[k]; const rSet=h&&h.t==='c'&&h.r>0? h.r : 0; if(!rSet) return null; const g=cornerGeom(o,k); if(!g) return null;
+  const r=Math.min(rSet,g.rMax), d=r/Math.tan(g.theta/2); const P=g.P;
+  const T1=[P[0]+g.e1[0]*d,P[1]+g.e1[1]*d], T2=[P[0]+g.e2[0]*d,P[1]+g.e2[1]*d]; const cd=r/Math.sin(g.theta/2); const C=[P[0]+g.bis[0]*cd,P[1]+g.bis[1]*cd];
+  const a1=Math.atan2(T1[1]-C[1],T1[0]-C[0]); let da=Math.atan2(T2[1]-C[1],T2[0]-C[0])-a1; while(da>Math.PI) da-=2*Math.PI; while(da<-Math.PI) da+=2*Math.PI;
+  return {k, r, rSet, d, T1, T2, C, a1, da, len:Math.abs(da)*r, mid:[C[0]+Math.cos(a1+da/2)*r, C[1]+Math.sin(a1+da/2)*r], bis:g.bis, theta:g.theta};
+}
+function arcPts(F){ const out=[]; for(let s=0;s<CURVE_SEG;s++){ const a=F.a1+F.da*s/CURVE_SEG; out.push([F.C[0]+Math.cos(a)*F.r, F.C[1]+Math.sin(a)*F.r]); } return out; }
+const fillets = o => o.pts.map((_,k)=>filletAt(o,k));
+const hasFillet = o => (o.type==='poly'||o.type==='path') && !!o.hnd && o.hnd.some((h,k)=>h&&h.r>0&&filletAt(o,k));
+// Where a straight span really starts/ends once its corners are rounded.
+const spanStart = (o,k,F) => (F&&F[k])? F[k].T2 : o.pts[k];
+const spanEnd   = (o,k,F) => { const j=(k+1)%o.pts.length; return (F&&F[j])? F[j].T1 : o.pts[j]; };
+// Remove interior corners that lie within tol inches of the line through their neighbours, smallest first.
+function simplifyObj(o, tol=3){ ensureHnd(o); const closed=o.type==='poly', minN=closed?3:2; let removed=0;
+  for(;;){ const N=o.pts.length; if(N<=minN) break; let best=-1, bestD=Infinity;
+    for(let k=0;k<N;k++){ if(!closed&&(k===0||k===N-1)) continue; if(nodeT(o,k)!=='c'||(o.hnd[k].r>0)) continue; const dd=distToSeg(o.pts[k],o.pts[(k-1+N)%N],o.pts[(k+1)%N]); if(dd<bestD){bestD=dd;best=k;} }
+    if(best<0||bestD>tol) break; deleteVertex(o,best); removed++; }
+  return removed; }
 // Samples for span k (from vertex k to k+1): CURVE_SEG points from t=0 inclusive to t=1 exclusive.
-function spanPts(o,k){ const N=o.pts.length, a=o.pts[k], b=o.pts[(k+1)%N], out=[];
-  if(spanStraight(o,k)){ for(let s=0;s<CURVE_SEG;s++){ const t=s/CURVE_SEG; out.push([a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t]); } return out; }
+function spanPts(o,k,F){ const N=o.pts.length, a=o.pts[k], b=o.pts[(k+1)%N], out=[];
+  if(spanStraight(o,k)){ if(F===undefined) F=fillets(o); const sa=spanStart(o,k,F), sb=spanEnd(o,k,F); for(let s=0;s<CURVE_SEG;s++){ const t=s/CURVE_SEG; out.push([sa[0]+(sb[0]-sa[0])*t, sa[1]+(sb[1]-sa[1])*t]); } return out; }
   const ho=handleOut(o,k), hi=handleIn(o,(k+1)%N); const p1=[a[0]+ho[0],a[1]+ho[1]], p2=[b[0]+hi[0],b[1]+hi[1]];
   for(let s=0;s<CURVE_SEG;s++){ const t=s/CURVE_SEG, u=1-t; const w0=u*u*u, w1=3*u*u*t, w2=3*u*t*t, w3=t*t*t;
     out.push([w0*a[0]+w1*p1[0]+w2*p2[0]+w3*b[0], w0*a[1]+w1*p1[1]+w2*p2[1]+w3*b[1]]); }
   return out; }
 const isSmooth = o => (o.type==='poly'||o.type==='path') && o.kind!=='conduit' && o.pts.length>=(o.type==='poly'?3:2) && !!o.hnd && o.hnd.some(h=>h&&h.t==='s');
 const allSmooth = o => !!o.hnd && o.hnd.length>0 && o.hnd.every(h=>h&&h.t==='s');
-function geomPts(o){ if(!isSmooth(o)) return o.pts; const closed=o.type==='poly', spans=closed? o.pts.length : o.pts.length-1; let g=[]; for(let k=0;k<spans;k++) g=g.concat(spanPts(o,k)); if(!closed) g.push(o.pts[o.pts.length-1].slice()); return g; }
+const isCurved = o => isSmooth(o) || hasFillet(o);
+function geomPts(o){ if(!isCurved(o)) return o.pts; const N=o.pts.length, closed=o.type==='poly', spans=closed? N : N-1; const F=fillets(o); let g=[];
+  for(let k=0;k<spans;k++){ g=g.concat(spanPts(o,k,F)); const j=(k+1)%N; if(F[j] && (closed || j<N-1)) g=g.concat(arcPts(F[j])); }   // the arc at the far vertex follows its span
+  if(!closed) g.push(o.pts[N-1].slice()); return g; }
 // Point on the curve at the middle of span k (where the + insert handle sits).
-function spanMid(o,k){ const N=o.pts.length, a=o.pts[k], b=o.pts[(k+1)%N]; if(!isSmooth(o)||spanStraight(o,k)) return [(a[0]+b[0])/2,(a[1]+b[1])/2]; const s=spanPts(o,k); return s[CURVE_SEG/2]; }
+function spanMid(o,k){ const N=o.pts.length; if(spanStraight(o,k)){ const F=fillets(o), a=spanStart(o,k,F), b=spanEnd(o,k,F); return [(a[0]+b[0])/2,(a[1]+b[1])/2]; } const s=spanPts(o,k); return s[CURVE_SEG/2]; }
 const objArea  = o => polyArea(geomPts(o));
 const objLen   = o => pathLen(geomPts(o));                                   // open length
 const objPerim = o => { const g=geomPts(o); return pathLen(g.concat([g[0]])); };
 // Per-span lengths and label anchors for dimension labels on a smooth shape.
 function curveSpans(o){ const N=o.pts.length, closed=o.type==='poly', spans=closed? N : N-1, out=[];
-  for(let i=0;i<spans;i++){ const seg=spanPts(o,i).concat([o.pts[(i+1)%N]]); const a=seg[0], b=seg[seg.length-1]; out.push({len:pathLen(seg), mid:seg[CURVE_SEG/2], dx:b[0]-a[0], dy:b[1]-a[1], straight:spanStraight(o,i)}); }
+  const F=fillets(o);
+  for(let i=0;i<spans;i++){ const st=spanStraight(o,i); const seg=spanPts(o,i,F).concat([spanEnd(o,i,F)]); const a=o.pts[i], b=o.pts[(i+1)%N];
+    // straight spans report corner-to-corner (what you stake out); curved spans report the curve
+    out.push({len: st? dist(a,b) : pathLen(seg), mid:seg[CURVE_SEG/2], dx:b[0]-a[0], dy:b[1]-a[1], straight:st, arc:F[(i+1)%N]}); }
   return out; }
 // ghost=true is the cursor preview: it shows the next label without consuming it.
 function makeItem(lib, x, y, ghost){
@@ -267,6 +303,7 @@ function handleHit(o, pw){ // returns {type:'vertex',i} | {type:'mid',i} | {type
     }
     return null;
   }
+  if(o.hnd) for(let i=0;i<o.pts.length;i++){ const g=cornerGeom(o,i); if(!g) continue; const F=filletAt(o,i); const q = F? F.mid : [o.pts[i][0]+g.bis[0]*11/view.scale, o.pts[i][1]+g.bis[1]*11/view.scale]; if(dist(q,pw)<=tol) return {type:'rad',i}; }   // radius diamonds
   if(o.hnd) for(let i=0;i<o.pts.length;i++){ if(nodeT(o,i)!=='s') continue; const p=o.pts[i];   // tangent handles first: they sit near the vertex
     const ho=handleOut(o,i), hi=handleIn(o,i);
     if(handleShown(o,i,'o') && dist([p[0]+ho[0],p[1]+ho[1]],pw)<=tol) return {type:'hout',i};
@@ -368,6 +405,8 @@ function dimEdges(pts, closed, strong, o){
   for(let i=0;i<n;i++){ const a=pts[i], b=pts[(i+1)%pts.length]; const L=dist(a,b); if(L*view.scale<24) continue;
     const m=w2s([(a[0]+b[0])/2,(a[1]+b[1])/2]); const dx=b[0]-a[0], dy=b[1]-a[1]; const len=Math.hypot(dx,dy)||1; const nx=-dy/len, ny=dx/len;
     label(fmtLen(L), [m[0]+nx*10, m[1]+ny*10], {size:strong?11:10, color:strong?'#1a3d6b':'#555'}); }
+  // rounded corners: radius label just outside the arc, on the corner side
+  if(o && strong && o.hnd) fillets(o).forEach(F=>{ if(!F) return; const m=w2s(F.mid); label('r '+fmtLen(F.r), [m[0]-F.bis[0]*14, m[1]-F.bis[1]*14], {size:10, color:'#b26a00'}); });
 }
 function drawItem(o, selected, st){
   const c=w2s([o.x,o.y]); const s=view.scale;
@@ -415,6 +454,9 @@ function drawHandles(o){
     const so=handleShown(o,i,'o')? w2s([p[0]+ho[0],p[1]+ho[1]]) : c, si=handleShown(o,i,'i')? w2s([p[0]+hi[0],p[1]+hi[1]]) : c;
     ctx.strokeStyle='rgba(255,140,0,.8)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(si[0],si[1]); ctx.lineTo(c[0],c[1]); ctx.lineTo(so[0],so[1]); ctx.stroke();
     ctx.strokeStyle='#4fa3ff'; ctx.lineWidth=1.5; [so,si].forEach((q,j)=>{ if(q===c) return; ctx.fillStyle= (j===0? o.hnd[i].o : o.hnd[i].i)? '#ffb347' : '#ffe0b2'; ctx.beginPath(); ctx.arc(q[0],q[1],4.5,0,7); ctx.fill(); ctx.stroke(); }); });
+  // corner-radius handles: a diamond on the arc (rounded) or just inside the corner (sharp, ready to drag)
+  o.pts.forEach((p,i)=>{ const g=cornerGeom(o,i); if(!g) return; const F=filletAt(o,i); const q = F? w2s(F.mid) : (()=>{ const c=w2s(p); return [c[0]+g.bis[0]*11, c[1]+g.bis[1]*11]; })();
+    ctx.fillStyle= F? '#ffb347' : 'rgba(255,179,71,.35)'; ctx.strokeStyle= F? '#b26a00' : 'rgba(178,106,0,.5)'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.moveTo(q[0],q[1]-5); ctx.lineTo(q[0]+5,q[1]); ctx.lineTo(q[0],q[1]+5); ctx.lineTo(q[0]-5,q[1]); ctx.closePath(); ctx.fill(); ctx.stroke(); });
   // vertices: square = corner, circle = smooth
   sp.forEach((p,i)=>{ ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; ctx.lineWidth=1.5; if(nodeT(o,i)==='s'){ ctx.beginPath(); ctx.arc(p[0],p[1],5,0,7); ctx.fill(); ctx.stroke(); } else { ctx.fillRect(p[0]-4.5,p[1]-4.5,9,9); ctx.strokeRect(p[0]-4.5,p[1]-4.5,9,9); } });
 }
