@@ -1,6 +1,6 @@
 # Backyard Designer — project handoff for Claude Code
 
-Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.14.3`.
+Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.16.1`.
 
 ## Working rules (non-negotiable)
 
@@ -21,11 +21,12 @@ src/p1_head.html    HTML skeleton + all CSS + Help tab text
 src/p2_data.js      constants, BUILD_ID, LAYERS, HEADS (sprinkler DB), PLANTS, LIB (object library), KIND_STYLE, PAVER_SIZES, ZONE_COLORS, DEFAULT_PRICES
 src/p3_engine.js    state, view, helpers (fmtLen/parseLen/geometry), history+autosave, object factories, hit-testing, all canvas rendering, conduitFittings()
 src/p4_ui.js        left panel builder, mouse/keyboard handlers, right-panel tabs (Properties/Layers/Zones/BOM), computeBom(), import/export/PNG, init
-test/smoke.js       Playwright end-to-end suite, 94 assertions (scene build, hit-test precedence,
+test/smoke.js       Playwright end-to-end suite, 110 assertions (scene build, hit-test precedence,
                     undo hygiene, vertex drag, conduit fittings, parseLen, zone clamp, PSI warning,
                     BOM escaping, survey labels/deltas/slope/CSV/migrate, typed lengths / ortho /
                     closing gap / edge edit / units toggle, undo-while-drawing, smooth curves,
-                    circle/rectangle modes, walking-path BOM, JSON round-trip, PNG export).
+                    circle/rectangle modes, walking-path BOM, anchors/handles/mirror/reset/insert-on-curve,
+                    JSON round-trip, PNG export).
                     Exits non-zero on failure.
 test/syntax.js      Browserless build-integrity + parse check. Exits non-zero on failure.
 mistake.md          self-check log (see rule 3)
@@ -57,7 +58,7 @@ CI: `.github/workflows/ci.yml` runs the syntax check, then the smoke test, on ev
 **Objects** — three types, all with `id, type, kind, layer, name, rot, props`:
 - `poly`: `pts:[[x,y],...]` closed area. kinds: yard, house, patio, lawn, paver, rock, mulch, planter, area.
 - `path`: `pts` open polyline. kinds: fence, pipe (½" poly/Blu-Lock), drip (¼"), drip12 (½" drip/fountain fill), conduit (Cantex ¾"), wire (LV), trench, **walkrock / walkpaver / walkstep** (wide walking paths: `props.width`, plus depth / paver / spacing).
-- Any poly or path may carry `props.smooth:true` — see Curves below.
+- Every poly/path carries `hnd`, parallel to `pts`: `{t:'c'|'s', i:[dx,dy]|null, o:[dx,dy]|null}` — see Anchors below. `props.smooth` is now only a creation default (walking paths) and is kept in sync by `setNodeType/setAllNodes` for readability.
 - `item`: `x,y` center, `w,h`, `shape` (rect|circle|head|plant|text|spoint), `color`. kinds: head, hosebib, timer, manifold, backflow, filter, floatvalve, valvebox, panel, gfci, jbox, lb, transformer, pathlight, spot, well, walllight, stringpost, fountain, paverunit, boulder, firepit, raisedbed, furniture, shed, fixed, gate, tree, shrub, label, plant, spoint.
 
 Only one `yard` poly is allowed (drawing a new one replaces it; it is `unshift`ed so it renders underneath).
@@ -66,7 +67,12 @@ Only one `yard` poly is allowed (drawing a new one replaces it; it is `unshift`e
 
 **UI state** `ui`: `tool` ∈ select|pan|measure|draw|place, `lib` = active library entry, `drawPts`, `selId`, `drag` ({type: move|vertex|resize|radius|arcstart|arcend}), toggles `showGrid/snap/showDims/showArcs`.
 
-**Curves (2026.09.14.3)**: `o.pts` are always the *control points*. Everything geometric goes through `geomPts(o)` — `curvePts(pts, closed)` (uniform Catmull-Rom, `CURVE_SEG=8` samples per span, closed shapes wrap, open ones clamp) when `isSmooth(o)`, else `o.pts`. Use `objArea / objLen / objPerim`, never `polyArea(o.pts)` on an object. Hit-testing, bounds, fills, strokes, labels and every BOM line read the curve; vertex/midpoint handles, drag, the Edges table and `conduitFittings` stay on control points (Edges is hidden for smooth shapes; conduit refuses smooth). `curveSpans(o)` gives per-span curved lengths for dimension labels.
+**Anchors and curves (2026.09.16.1, replaces the all-or-nothing Smooth of .14.3)**: `o.pts` are anchors; `o.hnd[k]` says whether anchor k is a **corner** (`t:'c'`) or **smooth** (`t:'s'`) and holds its tangent handles `i` (incoming) / `o` (outgoing) as offsets from the vertex, `null` = automatic. A span k→k+1 is **straight iff both ends are corners** (`spanStraight`); otherwise it is a cubic Bézier with control points `pts[k]+handleOut(k)` and `pts[k+1]+handleIn(k+1)`, where a corner end contributes `[0,0]`. Automatic handles are the Catmull-Rom tangent `(next−prev)/6` (`autoTan`, clamped at open ends), so a shape whose anchors are all smooth-auto is *exactly* the old Catmull-Rom curve — the smoke test asserts this to 1e-6.
+- `geomPts(o)` = `o.pts` when nothing is smooth, else `spanPts(o,k)` for every span (`CURVE_SEG=8` samples, linear for straight spans so indexing stays uniform). Use `objArea / objLen / objPerim`, never `polyArea(o.pts)` on an object. `curveSpans(o)` gives per-span length, midpoint and `straight` for dimension labels and the Edges table. `spanMid(o,k)` is where the + insert handle sits (on the curve).
+- `ensureHnd(o)` normalises/creates `hnd` (from `props.smooth` for pre-anchor files) — called by `migrate`, `makePoly/makePath`, and Properties. `insertVertex/deleteVertex` keep `hnd` parallel; an inserted anchor is smooth if either neighbour is. `setNodeType/setAllNodes` clear handles when they change type.
+- Interaction (p4): `handleHit` returns `hout`/`hin` before `vertex` (handles sit near the vertex); dragging a handle stores the raw offset (`r2`, never grid-snapped), Shift = 15° steps, and mirrors the opposite handle to the opposite direction **keeping that handle's own length** unless Alt (`drag.alt`) — Alt makes a cusp. `dblclick` on a vertex flips corner↔smooth; on a handle resets it to auto. Handles are drawn orange (dark = hand-set, light = auto); vertices are squares (corner) or circles (smooth). `handleShown` hides the incoming handle at an open path's first anchor and the outgoing one at its last.
+- Properties: the Smooth checkbox is `[data-allsmooth]` — checked = all smooth, indeterminate = mixed — and sets every anchor at once; the Vertices table has a ○/□ toggle per row (`[data-vt]`); the Edges table gives a typed-length input only on straight spans and shows curved spans read-only. Conduit has none of this and `isSmooth` is always false for it.
+- `curvePts` (plain Catmull-Rom) is retained for `CIRCLE_K` and the drawing preview only.
 
 **Shape switch** (`ui.areaShape`: poly | rect | circle, buttons in Draw areas): rect = two clicks or one click + typed `W x H` (`rectPts`); circle = centre click + radius click or typed radius (`circlePts`, 8 points, `{smooth:true}`). `CIRCLE_K` (computed once from the curve) pushes the 8 control points ~0.5% outside the nominal radius so the *drawn* curve has the true radius — area within 0.01% of πr². Both finish through `commitShape → finishDraw(null, extra)`.
 
@@ -137,12 +143,16 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - Edges table in Properties: type a side length, the far vertex slides along the edge.
 - `ft-in` / `ft.dec` top-bar button toggles every displayed length between `30'-2"` and `30.17 ft`.
 - Place item: click repeatedly; Esc stops. Ghost preview follows cursor.
-- Select: drag = move; drag vertex = reshape; click midpoint "+" = insert vertex; Alt-click vertex = delete; drag corner square = resize (circles stay round); heads have radius handle (white) and arc handles (orange).
+- Select: drag = move; drag vertex = reshape; click midpoint "+" = insert vertex (on the curve for curved spans); Alt-click vertex = delete; drag corner square = resize (circles stay round); heads have radius handle (white) and arc handles (orange).
+- Anchors: double-click a vertex → corner ↔ smooth (also ○/□ in the Vertices table); drag an orange tangent handle to shape the curve (mirrored; Alt = cusp; Shift = 15° steps); double-click a handle → automatic. Smooth checkbox = all anchors at once.
 - Keys: V select, H pan, M measure, Enter finish, Esc cancel/deselect, Del delete, R rotate 15° (Shift+R 90°), Ctrl+D duplicate, Ctrl+Z/Y, G grid, S snap, D dims, F fit, arrows nudge 6" (Shift 12"). **While drawing, Ctrl+Z / Backspace / Delete remove the last point** and never touch app history. App-level undo/redo call `notice(histDiff(...))` — "Removed X — Ctrl+Y brings it back".
 - Length inputs accept `12'6"`, `12' 6`, `12.5` (feet), `150in`, `12ft 6in` (`parseLen`).
 - Top bar: New, Import (JSON), Export (JSON), PNG (prompts px/ft; renders offscreen at that scale with a title block, restores view), BOM CSV, Undo/Redo, Grid/Snap/Dims/Arcs toggles, Fit, Supply GPM/PSI.
 - Survey: Survey / grade → Survey point, click to place (repeat). Properties: reading (m), Benchmark tick, note. Survey tab for the table, high/low, slope and CSV.
 - Right tabs: Properties (context form), Layers (eye/lock), Zones, BOM, Survey, Help.
+
+## Added in 2026.09.16.1
+- Per-anchor corner/smooth with draggable tangent handles (mirrored, Alt for cusps, Shift for 15° steps, double-click to reset). Mixed shapes: straight edges and curves on the same outline. Automatic handles reproduce the previous curves exactly, so existing designs migrate without moving.
 
 ## Added in 2026.09.14.3
 - Smooth curves through control points for any area or run (Smooth tick); circle and rectangle draw modes; walking paths (river rock, paver, stepping stones in rock) with textures, real-width hit-testing and full BOM incl. paver base and edging; survey readings default to cm; Ctrl+Z/Backspace remove the last point while drawing; undo/redo announce what they changed.
@@ -175,7 +185,7 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - Autosave has no `beforeunload` flush; a change made inside the 400 ms debounce window is lost if the tab closes.
 - `computeBom()` hardcodes a rule per object kind; if the library keeps growing, move BOM rules onto the `LIB` entries.
 - Supply GPM/PSI default to 6/50 with no prompt to measure. Every zone number downstream depends on those two being real.
-- Curves: uniform Catmull-Rom only (no tension control, no Bézier handles, no arc-by-three-points). A circle's 8 span labels are noisy at small sizes — toggle Dims. Walking-path textures are screen-space (do not scale with zoom), by design.
+- Curves: no click-drag-to-pull-a-handle while *drawing* (Illustrator pen); anchors are shaped after the shape exists. No arc-by-three-points. Handle drags are not undoable per-move (one history step per drag, like vertices). A circle's 8 span labels are noisy at small sizes — toggle Dims. Walking-path textures are screen-space (do not scale with zoom), by design.
 - Typed lengths: no typed angle syntax (`30.17 @ 37`); direction is by mouse only. No closing-error *distribution* (compass-rule adjustment) — the gap is reported, not spread across the sides.
 - Survey: no turning points (single instrument setup assumed); no contour/heat-map rendering; `migrate` can under-derive `nextLabel` for a pre-2026.09.14.1 file whose highest-labelled point was deleted (labels could then repeat once — only affects files that never had the field).
 - Yard measurements are pending; lawn on record is 45×22 ft minus a 9×15 ft patio plus an 8×15 ft strip (975 sq ft), Monaco Bermuda seeding planned 2027.

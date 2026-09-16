@@ -24,6 +24,13 @@ function buildLeft(){
 // ================= Mouse =================
 let lastClickT=0;
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
+// Double-click: on a vertex flips corner <-> smooth; on a tangent handle resets it to automatic.
+canvas.addEventListener('dblclick', e=>{
+  if(ui.tool!=='select') return; const sel=state.objects.find(o=>o.id===ui.selId); if(!sel||(sel.type!=='poly'&&sel.type!=='path')||sel.kind==='conduit'||!objLayerVisible(sel)||objLocked(sel)) return;
+  const pw=s2w(evtPos(e)); const h=handleHit(sel,pw); if(!h) return;
+  if(h.type==='vertex'){ pushHist(); setNodeType(sel,h.i, nodeT(sel,h.i)==='s'?'c':'s'); ui.drag=null; refresh(); }
+  else if(h.type==='hout'||h.type==='hin'){ pushHist(); sel.hnd[h.i][h.type==='hout'?'o':'i']=null; ui.drag=null; refresh(); }
+});
 canvas.addEventListener('wheel', e=>{ e.preventDefault(); const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top; const f=Math.exp(-e.deltaY*0.0015); const ns=Math.min(40,Math.max(0.15,view.scale*f)); const k=ns/view.scale; view.ox=mx-(mx-view.ox)*k; view.oy=my-(my-view.oy)*k; view.scale=ns; draw(); },{passive:false});
 function evtPos(e){ const r=canvas.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
 canvas.addEventListener('mousedown', e=>{
@@ -47,9 +54,9 @@ canvas.addEventListener('mousedown', e=>{
   // select
   const sel=state.objects.find(o=>o.id===ui.selId);
   if(sel && objLayerVisible(sel) && !objLocked(sel)){ const h=handleHit(sel,pw); if(h){
-      if(h.type==='vertex' && e.altKey){ if(sel.pts.length>(sel.type==='poly'?3:2)){ pushHist(); sel.pts.splice(h.i,1); refresh(); } return; }
-      if(h.type==='mid'){ pushHist(); const a=sel.pts[h.i], b=sel.pts[(h.i+1)%sel.pts.length]; sel.pts.splice(h.i+1,0,[snap((a[0]+b[0])/2),snap((a[1]+b[1])/2)]); ui.drag={type:'vertex',i:h.i+1,o:sel}; refresh(); return; }
-      ui.drag=Object.assign({o:sel, start:pw, orig:JSON.parse(JSON.stringify(sel)), pending:true}, h); return; } }
+      if(h.type==='vertex' && e.altKey){ if(sel.pts.length>(sel.type==='poly'?3:2)){ pushHist(); deleteVertex(sel,h.i); refresh(); } return; }
+      if(h.type==='mid'){ pushHist(); const at=h.at||[0,0]; insertVertex(sel, h.i+1, isSmooth(sel)? [r2(at[0]),r2(at[1])] : [snap(at[0]),snap(at[1])]); ui.drag={type:'vertex',i:h.i+1,o:sel}; refresh(); return; }
+      ui.drag=Object.assign({o:sel, start:pw, orig:JSON.parse(JSON.stringify(sel)), pending:true, alt:e.altKey}, h); return; } }
   const hit=hitTest(pw);
   ui.selId = hit? hit.id : null;
   if(hit){ ui.drag={type:'move', o:hit, start:pw, orig:JSON.parse(JSON.stringify(hit)), pending:true}; }
@@ -65,6 +72,10 @@ window.addEventListener('mousemove', e=>{
     if(d.type==='move'){ const dx=snap(pw[0]-d.start[0]), dy=snap(pw[1]-d.start[1]);
       if(o.type==='item'){ o.x=d.orig.x+dx; o.y=d.orig.y+dy; } else o.pts=d.orig.pts.map(p=>[p[0]+dx,p[1]+dy]); }
     else if(d.type==='vertex'){ o.pts[d.i]=[snap(pw[0]),snap(pw[1])]; }
+    else if(d.type==='hout'||d.type==='hin'){ // tangent handle: raw (not grid-snapped), Shift = 15-degree steps, Alt = break the mirror
+      const p=o.pts[d.i]; let v=[pw[0]-p[0], pw[1]-p[1]]; if(e.shiftKey){ const L=Math.hypot(v[0],v[1]); const a=Math.round(Math.atan2(v[1],v[0])/(Math.PI/12))*(Math.PI/12); v=[Math.cos(a)*L, Math.sin(a)*L]; }
+      v=[r2(v[0]),r2(v[1])]; const h=o.hnd[d.i]; const me=d.type==='hout'?'o':'i', other=me==='o'?'i':'o';
+      h[me]=v; if(!d.alt){ const cur = h[other] || (other==='o'? handleOut(o,d.i) : handleIn(o,d.i)); const L=Math.hypot(cur[0],cur[1]), M=Math.hypot(v[0],v[1])||1; h[other]=[r2(-v[0]/M*L), r2(-v[1]/M*L)]; } }
     else if(d.type==='resize'){ const lp=toLocal(o,pw); let w=Math.max(1,snap((lp[0]-o.x)*2)), h=Math.max(1,snap((lp[1]-o.y)*2)); if(o.shape==='circle'||o.shape==='plant'||o.shape==='head'){ const m=Math.max(w,h); w=h=m; } // keep center fixed
       o.w=w; o.h=h; }
     else if(d.type==='radius'){ const r=Math.hypot(pw[0]-o.x,pw[1]-o.y); const h=headSpec(o); o.props.radius=Math.min(h.rmax*12, Math.max(h.rmin*12, Math.round(r/6)*6)); }
@@ -189,7 +200,7 @@ function renderProps(){
     if(['pathlight','spot','well','walllight','stringpost'].includes(o.kind)) h+=field('Watts', `<input type="number" data-numprop="watts" value="${o.props.watts||0}">`);
     if(o.shape==='text'){ h+=field('Text', `<input data-prop="text" value="${esc(o.props.text||'')}">`); h+=field('Size', `<input type="number" data-numprop="size" value="${o.props.size||12}">`); }
   } else {
-    if(o.kind!=='conduit') h+=field('Smooth', `<input type="checkbox" data-boolprop="smooth" ${o.props.smooth?'checked':''}> <span class="muted" style="font-size:11px">curve through the points</span>`);
+    if(o.kind!=='conduit'){ ensureHnd(o); const all=allSmooth(o), any=isSmooth(o); h+=field('Smooth', `<input type="checkbox" data-allsmooth ${all?'checked':''} ${any&&!all?'data-mixed="1"':''}> <span class="muted" style="font-size:11px">${any&&!all?'mixed — ':''}all anchors curved</span>`); }
     if(o.type==='poly'){ h+=`<div class="note">Area <b>${fmtArea(objArea(o))}</b> · perimeter ${fmtLen(objPerim(o))} · ${o.pts.length} ${isSmooth(o)?'control points':'vertices'}</div>`;
       if(o.kind==='rock') h+=field('Rock depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">${rockCalc(o)}</div>`;
       if(o.kind==='paver') h+=field('Paver size', `<select data-prop="paver">${PAVER_SIZES.map(p=>`<option value="${p.id}" ${p.id===o.props.paver?'selected':''}>${p.id}</option>`).join('')}</select>`)+`<div class="note">≈ ${paverCount(o)} pavers (5% waste)</div>`;
@@ -204,10 +215,10 @@ function renderProps(){
       if(o.kind==='trench') h+=field('Width', `<input data-lenprop="width" value="${fmtLen(o.props.width)}">`)+field('Depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">Dig volume ≈ ${(objLen(o)*o.props.width*o.props.depth/46656).toFixed(2)} cu yd</div>`;
       if(o.kind==='wire') h+=`<div class="note">Low-voltage: keep total fixture watts under transformer rating; 12-ga wire for runs over ~100 ft.</div>`;
     }
-    h+=`<div class="note">Vertices:</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td></tr>`).join('')}</table>`;
+    h+=`<div class="note">Anchors — ○ smooth · □ corner. Double-click one on the canvas to flip it; drag the orange handles to shape a curve (Alt breaks the mirror, Shift steps 15°); double-click a handle to reset it.</div><table>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td>${o.kind!=='conduit'?`<td><button class="small" data-vt="${i}" title="${nodeT(o,i)==='s'?'smooth — click for corner':'corner — click for smooth'}">${nodeT(o,i)==='s'?'○':'□'}</button></td>`:''}</tr>`).join('')}</table>`;
     const ne=o.type==='poly'? o.pts.length : o.pts.length-1;
-    if(isSmooth(o)) h+=`<div class="note">Smooth shape — drag the control points to reshape it; span lengths are shown on the canvas.</div>`; else
-    h+=`<div class="note">Edges — type a length and the far vertex slides along the edge:</div><table>${Array.from({length:ne},(_,i)=>`<tr><td class="muted">${i+1}→${(i+1)%o.pts.length+1}</td><td><input data-edge="${i}" value="${fmtLen(dist(o.pts[i],o.pts[(i+1)%o.pts.length]))}"></td></tr>`).join('')}</table>`;
+    const spans=curveSpans(o);
+    h+=`<div class="note">Edges — straight edges take a typed length (the far vertex slides along); curved spans show their length.</div><table>${Array.from({length:ne},(_,i)=>`<tr><td class="muted">${i+1}→${(i+1)%o.pts.length+1}</td><td>${spans[i].straight?`<input data-edge="${i}" value="${fmtLen(dist(o.pts[i],o.pts[(i+1)%o.pts.length]))}">`:`<span class="muted">${fmtLen(spans[i].len)} curved</span>`}</td></tr>`).join('')}</table>`;
   }
   h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'&&o.kind!=='spoint'?'<button id="pRot">Rotate 90°</button>':''}</div>`;
   el.innerHTML=h;
@@ -221,6 +232,8 @@ function renderProps(){
     o.props[i.dataset.numprop]=Math.min(mx,Math.max(mn,v)); commit(); });
   el.querySelectorAll('[data-lenprop]').forEach(i=> i.onchange=()=>{ const v=parseLen(i.value); if(isNaN(v)) return; pushHist(); o.props[i.dataset.lenprop]=v; if(i.dataset.lenprop==='radius'){ const hs=headSpec(o); o.props.radius=Math.min(hs.rmax*12,Math.max(hs.rmin*12,v)); } commit(); });
   el.querySelectorAll('[data-boolprop]').forEach(i=> i.onchange=()=>{ pushHist(); o.props[i.dataset.boolprop]=i.checked; commit(); });
+  el.querySelectorAll('[data-allsmooth]').forEach(i=>{ if(i.dataset.mixed) i.indeterminate=true; i.onchange=()=>{ pushHist(); setAllNodes(o, i.checked?'s':'c'); commit(); }; });
+  el.querySelectorAll('[data-vt]').forEach(b=> b.onclick=()=>{ pushHist(); const k=+b.dataset.vt; setNodeType(o,k, nodeT(o,k)==='s'?'c':'s'); commit(); });
   el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtReadingNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });
   el.querySelectorAll('[data-bench]').forEach(i=> i.onchange=()=>{ pushHist(); state.objects.forEach(x=>{ if(x.kind==='spoint') x.props.bench=false; }); o.props.bench=i.checked; commit(); }); // exactly one benchmark
   el.querySelectorAll('[data-arc]').forEach(b=> b.onclick=()=>{ pushHist(); o.props.arc=+b.dataset.arc; commit(); });

@@ -138,12 +138,17 @@ function migrate(st){
   st.objects = st.objects||[]; st.nextId = st.nextId||(st.objects.length+1);
   st.slope = st.slope||{a:null,b:null};
   if(st.nextLabel==null){ const idx=st.objects.filter(o=>o.kind==='spoint'&&o.props&&o.props.label).map(o=>labelIndex(o.props.label)); st.nextLabel = idx.length? Math.max(...idx)+1 : 0; }
-  st.objects.forEach(o=>{ o.props=o.props||{}; if(o.rot==null) o.rot=0; });
+  st.objects.forEach(o=>{ o.props=o.props||{}; if(o.rot==null) o.rot=0; ensureHnd(o); });   // pre-anchor files: props.smooth -> all smooth / all corner
 }
 
 // ================= Object creation =================
-function makePoly(lib, pts, extra){ return {id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: {}, extra||{})}; }
-function makePath(lib, pts){ return {id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='trench'?{width:6,depth:18}:{})}; }
+function makePoly(lib, pts, extra){ return ensureHnd({id:uid(), type:'poly', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='rock'?{depth:2}: lib.kind==='paver'?{paver:'12x12'}: {}, extra||{})}); }
+function makePath(lib, pts){ return ensureHnd({id:uid(), type:'path', kind:lib.kind, layer:lib.layer, name:lib.name, pts, rot:0, props: Object.assign({}, lib.props||{}, lib.kind==='trench'?{width:6,depth:18}:{})}); }
+// Vertex insert/delete must keep hnd parallel to pts.
+function insertVertex(o,k,pt){ o.pts.splice(k,0,pt); const N=o.pts.length; const nb=[(k-1+N)%N,(k+1)%N].some(j=>nodeT(o,j)==='s'); if(o.hnd) o.hnd.splice(k,0,{t:nb?'s':'c', i:null, o:null}); }
+function deleteVertex(o,k){ o.pts.splice(k,1); if(o.hnd) o.hnd.splice(k,1); }
+function setNodeType(o,k,t){ ensureHnd(o); o.hnd[k]={t, i:null, o:null}; if(o.props) o.props.smooth=allSmooth(o); }
+function setAllNodes(o,t){ ensureHnd(o); o.hnd=o.pts.map(()=>({t, i:null, o:null})); if(o.props) o.props.smooth=(t==='s'); }
 // Shape builders for the Draw-areas shape switch. A circle is 8 control points + smooth. Catmull-Rom through
 // points ON a circle runs ~0.5% inside it (1.1% low on area), so the control points are pushed out by
 // CIRCLE_K, computed once from the curve itself, and the drawn curve has the true radius to within 0.05%.
@@ -165,14 +170,46 @@ function curvePts(pts, closed, seg=CURVE_SEG){
   return out;
 }
 const CIRCLE_K = (()=>{ const raw=[]; for(let i=0;i<8;i++){ const a=i/8*2*Math.PI; raw.push([Math.cos(a),Math.sin(a)]); } return Math.sqrt(Math.PI/polyArea(curvePts(raw,true))); })();
-const isSmooth = o => !!(o.props&&o.props.smooth) && o.kind!=='conduit' && o.pts.length>=(o.type==='poly'?3:2);
-const geomPts  = o => isSmooth(o)? curvePts(o.pts, o.type==='poly') : o.pts;
+// ---- Anchors. o.hnd[k] = {t:'c'|'s', i:[dx,dy]|null, o:[dx,dy]|null} parallel to o.pts.
+// t: corner (straight edges either side) or smooth (curved). i/o: incoming/outgoing tangent handle as an
+// offset from the vertex; null = automatic (the Catmull-Rom tangent, which is exactly the old curve).
+// A span is straight only when BOTH its ends are corners; otherwise it is a cubic Bezier whose control
+// points are the two handles (a corner end contributes a zero-length handle). ----
+function ensureHnd(o){
+  if(o.type!=='poly'&&o.type!=='path') return o;
+  const def=()=>({t: o.props&&o.props.smooth? 's':'c', i:null, o:null});
+  if(!Array.isArray(o.hnd)) o.hnd=[];
+  while(o.hnd.length<o.pts.length) o.hnd.push(def());
+  if(o.hnd.length>o.pts.length) o.hnd.length=o.pts.length;
+  o.hnd.forEach((h,k)=>{ if(!h||typeof h!=='object') o.hnd[k]=def(); else { if(h.t!=='s') h.t='c'; if(h.i!=null&&!Array.isArray(h.i)) h.i=null; if(h.o!=null&&!Array.isArray(h.o)) h.o=null; } });
+  return o;
+}
+const nodeT = (o,k) => (o.hnd&&o.hnd[k]&&o.hnd[k].t)||'c';
+// Automatic tangent at vertex k: (next - prev)/6, clamped at open ends. Equals uniform Catmull-Rom.
+function autoTan(o,k){ const N=o.pts.length, closed=o.type==='poly';
+  const pv = closed? o.pts[(k-1+N)%N] : o.pts[Math.max(0,k-1)], nx = closed? o.pts[(k+1)%N] : o.pts[Math.min(N-1,k+1)];
+  return [(nx[0]-pv[0])/6, (nx[1]-pv[1])/6]; }
+function handleOut(o,k){ if(nodeT(o,k)!=='s') return [0,0]; const h=o.hnd[k].o; return h||autoTan(o,k); }
+function handleIn(o,k){  if(nodeT(o,k)!=='s') return [0,0]; const h=o.hnd[k].i; if(h) return h; const t=autoTan(o,k); return [-t[0],-t[1]]; }
+const spanStraight = (o,k) => { const N=o.pts.length; return nodeT(o,k)==='c' && nodeT(o,(k+1)%N)==='c'; };
+// Samples for span k (from vertex k to k+1): CURVE_SEG points from t=0 inclusive to t=1 exclusive.
+function spanPts(o,k){ const N=o.pts.length, a=o.pts[k], b=o.pts[(k+1)%N], out=[];
+  if(spanStraight(o,k)){ for(let s=0;s<CURVE_SEG;s++){ const t=s/CURVE_SEG; out.push([a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t]); } return out; }
+  const ho=handleOut(o,k), hi=handleIn(o,(k+1)%N); const p1=[a[0]+ho[0],a[1]+ho[1]], p2=[b[0]+hi[0],b[1]+hi[1]];
+  for(let s=0;s<CURVE_SEG;s++){ const t=s/CURVE_SEG, u=1-t; const w0=u*u*u, w1=3*u*u*t, w2=3*u*t*t, w3=t*t*t;
+    out.push([w0*a[0]+w1*p1[0]+w2*p2[0]+w3*b[0], w0*a[1]+w1*p1[1]+w2*p2[1]+w3*b[1]]); }
+  return out; }
+const isSmooth = o => (o.type==='poly'||o.type==='path') && o.kind!=='conduit' && o.pts.length>=(o.type==='poly'?3:2) && !!o.hnd && o.hnd.some(h=>h&&h.t==='s');
+const allSmooth = o => !!o.hnd && o.hnd.length>0 && o.hnd.every(h=>h&&h.t==='s');
+function geomPts(o){ if(!isSmooth(o)) return o.pts; const closed=o.type==='poly', spans=closed? o.pts.length : o.pts.length-1; let g=[]; for(let k=0;k<spans;k++) g=g.concat(spanPts(o,k)); if(!closed) g.push(o.pts[o.pts.length-1].slice()); return g; }
+// Point on the curve at the middle of span k (where the + insert handle sits).
+function spanMid(o,k){ const N=o.pts.length, a=o.pts[k], b=o.pts[(k+1)%N]; if(!isSmooth(o)||spanStraight(o,k)) return [(a[0]+b[0])/2,(a[1]+b[1])/2]; const s=spanPts(o,k); return s[CURVE_SEG/2]; }
 const objArea  = o => polyArea(geomPts(o));
 const objLen   = o => pathLen(geomPts(o));                                   // open length
 const objPerim = o => { const g=geomPts(o); return pathLen(g.concat([g[0]])); };
 // Per-span lengths and label anchors for dimension labels on a smooth shape.
-function curveSpans(o){ const g=curvePts(o.pts, o.type==='poly'), closed=o.type==='poly', spans=closed? o.pts.length : o.pts.length-1, out=[];
-  for(let i=0;i<spans;i++){ const seg=g.slice(i*CURVE_SEG, i*CURVE_SEG+CURVE_SEG+1); if(closed&&i===spans-1) seg.push(g[0]); const m=seg[Math.floor(seg.length/2)]; const a=seg[0], b=seg[seg.length-1]; out.push({len:pathLen(seg), mid:m, dx:b[0]-a[0], dy:b[1]-a[1]}); }
+function curveSpans(o){ const N=o.pts.length, closed=o.type==='poly', spans=closed? N : N-1, out=[];
+  for(let i=0;i<spans;i++){ const seg=spanPts(o,i).concat([o.pts[(i+1)%N]]); const a=seg[0], b=seg[seg.length-1]; out.push({len:pathLen(seg), mid:seg[CURVE_SEG/2], dx:b[0]-a[0], dy:b[1]-a[1], straight:spanStraight(o,i)}); }
   return out; }
 // ghost=true is the cursor preview: it shows the next label without consuming it.
 function makeItem(lib, x, y, ghost){
@@ -230,9 +267,13 @@ function handleHit(o, pw){ // returns {type:'vertex',i} | {type:'mid',i} | {type
     }
     return null;
   }
+  if(o.hnd) for(let i=0;i<o.pts.length;i++){ if(nodeT(o,i)!=='s') continue; const p=o.pts[i];   // tangent handles first: they sit near the vertex
+    const ho=handleOut(o,i), hi=handleIn(o,i);
+    if(handleShown(o,i,'o') && dist([p[0]+ho[0],p[1]+ho[1]],pw)<=tol) return {type:'hout',i};
+    if(handleShown(o,i,'i') && dist([p[0]+hi[0],p[1]+hi[1]],pw)<=tol) return {type:'hin',i}; }
   for(let i=0;i<o.pts.length;i++) if(dist(o.pts[i],pw)<=tol) return {type:'vertex',i};
   const n = o.type==='poly'? o.pts.length : o.pts.length-1;
-  for(let i=0;i<n;i++){ const a=o.pts[i], b=o.pts[(i+1)%o.pts.length]; const m=[(a[0]+b[0])/2,(a[1]+b[1])/2]; if(dist(m,pw)<=tol) return {type:'mid',i}; }
+  for(let i=0;i<n;i++){ const m=spanMid(o,i); if(dist(m,pw)<=tol) return {type:'mid',i,at:m}; }
   return null;
 }
 
@@ -355,6 +396,8 @@ function drawHeadArc(o, selected){
   ctx.fillStyle=hexA(zc, selected?.28:.14); ctx.fill(); ctx.strokeStyle=hexA(zc,.7); ctx.lineWidth=1; ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
 }
 function hexA(hex,a){ if(!hex||hex[0]!=='#') return hex; const n=parseInt(hex.slice(1),16); return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; }
+// An open path has no incoming handle at its first vertex and no outgoing one at its last.
+function handleShown(o,k,side){ if(o.type==='poly') return true; return side==='o'? k<o.pts.length-1 : k>0; }
 function drawHandles(o){
   ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; ctx.lineWidth=1.5;
   if(o.type==='item'){
@@ -366,8 +409,14 @@ function drawHandles(o){
   }
   const sp=o.pts.map(w2s);
   const n = o.type==='poly'? o.pts.length : o.pts.length-1;
-  for(let i=0;i<n;i++){ const a=sp[i], b=sp[(i+1)%sp.length]; const m=[(a[0]+b[0])/2,(a[1]+b[1])/2]; ctx.fillStyle='rgba(255,255,255,.8)'; ctx.beginPath(); ctx.arc(m[0],m[1],4,0,7); ctx.fill(); ctx.stroke(); label('+', m, {size:10,color:'#4fa3ff'}); }
-  sp.forEach(p=>{ ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p[0],p[1],5,0,7); ctx.fill(); ctx.stroke(); });
+  for(let i=0;i<n;i++){ const m=w2s(spanMid(o,i)); ctx.fillStyle='rgba(255,255,255,.8)'; ctx.strokeStyle='#4fa3ff'; ctx.beginPath(); ctx.arc(m[0],m[1],4,0,7); ctx.fill(); ctx.stroke(); label('+', m, {size:10,color:'#4fa3ff'}); }
+  // tangent handles for smooth anchors: a line through the vertex, orange dots at the ends
+  if(o.hnd) o.pts.forEach((p,i)=>{ if(nodeT(o,i)!=='s') return; const c=sp[i]; const ho=handleOut(o,i), hi=handleIn(o,i);
+    const so=handleShown(o,i,'o')? w2s([p[0]+ho[0],p[1]+ho[1]]) : c, si=handleShown(o,i,'i')? w2s([p[0]+hi[0],p[1]+hi[1]]) : c;
+    ctx.strokeStyle='rgba(255,140,0,.8)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(si[0],si[1]); ctx.lineTo(c[0],c[1]); ctx.lineTo(so[0],so[1]); ctx.stroke();
+    ctx.strokeStyle='#4fa3ff'; ctx.lineWidth=1.5; [so,si].forEach((q,j)=>{ if(q===c) return; ctx.fillStyle= (j===0? o.hnd[i].o : o.hnd[i].i)? '#ffb347' : '#ffe0b2'; ctx.beginPath(); ctx.arc(q[0],q[1],4.5,0,7); ctx.fill(); ctx.stroke(); }); });
+  // vertices: square = corner, circle = smooth
+  sp.forEach((p,i)=>{ ctx.fillStyle='#fff'; ctx.strokeStyle='#4fa3ff'; ctx.lineWidth=1.5; if(nodeT(o,i)==='s'){ ctx.beginPath(); ctx.arc(p[0],p[1],5,0,7); ctx.fill(); ctx.stroke(); } else { ctx.fillRect(p[0]-4.5,p[1]-4.5,9,9); ctx.strokeRect(p[0]-4.5,p[1]-4.5,9,9); } });
 }
 function drawDrawing(){
   if(!ui.lib || !ui.drawPts.length) { if(ui.lib&&ui.lib.tool==='item'&&ui.mouseW){ const g=makeItem(ui.lib, snap(ui.mouseW[0]), snap(ui.mouseW[1]), true); ctx.globalAlpha=.5; drawItem(g,false,{}); ctx.globalAlpha=1; } return; }
