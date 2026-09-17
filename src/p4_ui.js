@@ -29,6 +29,9 @@ canvas.addEventListener('dblclick', e=>{
   if(ui.tool!=='select') return; const sel=state.objects.find(o=>o.id===ui.selId); if(!sel||(sel.type!=='poly'&&sel.type!=='path')||sel.kind==='conduit'||!objLayerVisible(sel)||objLocked(sel)) return;
   const pw=s2w(evtPos(e)); const h=handleHit(sel,pw); if(!h) return;
   if(h.type==='vertex'){ pushHist(); setNodeType(sel,h.i, nodeT(sel,h.i)==='s'?'c':'s'); ui.drag=null; refresh(); }
+  else if(h.type==='mid'){ pushHist(); const G=arcGeom(sel,h.i); const at=h.at; insertVertex(sel, h.i+1, isCurved(sel)? [r2(at[0]),r2(at[1])] : [snap(at[0]),snap(at[1])]);
+    if(G){ const s2=r2(G.sg*G.r*(1-Math.cos(G.delta/4))); sel.hnd[h.i].b=s2; sel.hnd[h.i+1].b=s2; }   // both halves stay on the same circle
+    ui.drag=null; refresh(); }
   else if(h.type==='hout'||h.type==='hin'){ pushHist(); sel.hnd[h.i][h.type==='hout'?'o':'i']=null; ui.drag=null; refresh(); }
 });
 canvas.addEventListener('wheel', e=>{ e.preventDefault(); const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top; const f=Math.exp(-e.deltaY*0.0015); const ns=Math.min(40,Math.max(0.15,view.scale*f)); const k=ns/view.scale; view.ox=mx-(mx-view.ox)*k; view.oy=my-(my-view.oy)*k; view.scale=ns; draw(); },{passive:false});
@@ -55,7 +58,7 @@ canvas.addEventListener('mousedown', e=>{
   const sel=state.objects.find(o=>o.id===ui.selId);
   if(sel && objLayerVisible(sel) && !objLocked(sel)){ const h=handleHit(sel,pw); if(h){
       if(h.type==='vertex' && e.altKey){ if(sel.pts.length>(sel.type==='poly'?3:2)){ pushHist(); deleteVertex(sel,h.i); refresh(); } return; }
-      if(h.type==='mid'){ pushHist(); const at=h.at||[0,0]; insertVertex(sel, h.i+1, isCurved(sel)? [r2(at[0]),r2(at[1])] : [snap(at[0]),snap(at[1])]); ui.drag={type:'vertex',i:h.i+1,o:sel}; refresh(); return; }
+      if(h.type==='mid'){ ui.drag={type:'bow', i:h.i, o:sel, start:pw, orig:JSON.parse(JSON.stringify(sel)), pending:true}; return; }
       ui.drag=Object.assign({o:sel, start:pw, orig:JSON.parse(JSON.stringify(sel)), pending:true, alt:e.altKey}, h); return; } }
   const hit=hitTest(pw);
   ui.selId = hit? hit.id : null;
@@ -72,6 +75,11 @@ window.addEventListener('mousemove', e=>{
     if(d.type==='move'){ const dx=snap(pw[0]-d.start[0]), dy=snap(pw[1]-d.start[1]);
       if(o.type==='item'){ o.x=d.orig.x+dx; o.y=d.orig.y+dy; } else o.pts=d.orig.pts.map(p=>[p[0]+dx,p[1]+dy]); }
     else if(d.type==='vertex'){ o.pts[d.i]=[snap(pw[0]),snap(pw[1])]; }
+    else if(d.type==='bow'){ // bend this edge only: sagitta = cursor offset from the chord; radius snaps with the grid
+      const N=o.pts.length, A=o.pts[d.i], B=o.pts[(d.i+1)%N]; const c=dist(A,B); if(c>=1){ const dir=[(B[0]-A[0])/c,(B[1]-A[1])/c], nrm=[-dir[1],dir[0]], M=[(A[0]+B[0])/2,(A[1]+B[1])/2];
+        let s=(pw[0]-M[0])*nrm[0]+(pw[1]-M[1])*nrm[1]; if(Math.abs(s)<1) s=0;
+        else if(ui.snap && Math.abs(s)<=c/2){ const r=snap((c*c/4+s*s)/(2*Math.abs(s))); s=Math.sign(s)*sagForRadius(r,c); }
+        o.hnd[d.i].b=r2(s); if(!o.hnd[d.i].b) delete o.hnd[d.i].b; } }
     else if(d.type==='rad'){ // corner radius: distance dragged along the bisector -> r; snaps to the grid step
       const g=cornerGeom(o,d.i); if(g){ const dm=(pw[0]-g.P[0])*g.bis[0]+(pw[1]-g.P[1])*g.bis[1]; let r=Math.max(0, dm/(1/Math.sin(g.theta/2)-1)); r=Math.min(snap(r), g.rMax); if(r<3) r=0; if(r>0) o.hnd[d.i].r=r2(r); else delete o.hnd[d.i].r; } }
     else if(d.type==='hout'||d.type==='hin'){ // tangent handle: raw (not grid-snapped), Shift = 15-degree steps, Alt = break the mirror
@@ -202,7 +210,7 @@ function renderProps(){
     if(['pathlight','spot','well','walllight','stringpost'].includes(o.kind)) h+=field('Watts', `<input type="number" data-numprop="watts" value="${o.props.watts||0}">`);
     if(o.shape==='text'){ h+=field('Text', `<input data-prop="text" value="${esc(o.props.text||'')}">`); h+=field('Size', `<input type="number" data-numprop="size" value="${o.props.size||12}">`); }
   } else {
-    if(o.kind!=='conduit'){ ensureHnd(o); const all=allSmooth(o), any=isSmooth(o); h+=field('Smooth', `<input type="checkbox" data-allsmooth ${all?'checked':''} ${any&&!all?'data-mixed="1"':''}> <span class="muted" style="font-size:11px">${any&&!all?'mixed — ':''}all anchors curved</span>`); }
+    if(o.kind!=='conduit') ensureHnd(o);
     if(o.type==='poly'){ h+=`<div class="note">Area <b>${fmtArea(objArea(o))}</b> · perimeter ${fmtLen(objPerim(o))} · ${o.pts.length} ${isSmooth(o)?'control points':'vertices'}</div>`;
       if(o.kind==='rock') h+=field('Rock depth', `<input data-lenprop="depth" value="${fmtLen(o.props.depth)}">`)+`<div class="note">${rockCalc(o)}</div>`;
       if(o.kind==='paver') h+=field('Paver size', `<select data-prop="paver">${PAVER_SIZES.map(p=>`<option value="${p.id}" ${p.id===o.props.paver?'selected':''}>${p.id}</option>`).join('')}</select>`)+`<div class="note">≈ ${paverCount(o)} pavers (5% waste)</div>`;
@@ -222,7 +230,8 @@ function renderProps(){
     h+=`<div class="note">Anchors — □ corner · ○ smooth. Drag the orange ◆ at a corner to round it (or type r); double-click an anchor to flip it; smooth anchors get tangent handles (Alt breaks the mirror, Shift steps 15°, double-click resets).</div><table><tr><th></th><th>x</th><th>y</th>${o.kind!=='conduit'?'<th></th><th>r</th>':''}</tr>${o.pts.map((p,i)=>`<tr><td class="muted">${i+1}</td><td><input data-vx="${i}" value="${fmtLen(p[0])}"></td><td><input data-vy="${i}" value="${fmtLen(p[1])}"></td>${o.kind!=='conduit'?`<td><button class="small" data-vt="${i}" title="${nodeT(o,i)==='s'?'smooth — click for corner':'corner — click for smooth'}">${nodeT(o,i)==='s'?'○':'□'}</button></td><td>${elig[i]?`<input data-vr="${i}" value="${o.hnd[i].r>0?fmtLen(o.hnd[i].r):''}" placeholder="0">`:''}</td>`:''}</tr>`).join('')}</table>`;
     const ne=o.type==='poly'? o.pts.length : o.pts.length-1;
     const spans=curveSpans(o);
-    h+=`<div class="note">Edges — straight edges take a typed length (the far vertex slides along); curved spans show their length.</div><table>${Array.from({length:ne},(_,i)=>`<tr><td class="muted">${i+1}→${(i+1)%o.pts.length+1}</td><td>${spans[i].straight?`<input data-edge="${i}" value="${fmtLen(dist(o.pts[i],o.pts[(i+1)%o.pts.length]))}">`:`<span class="muted">${fmtLen(spans[i].len)} curved</span>`}</td></tr>`).join('')}</table>`;
+    h+=`<div class="note">Edges — drag the blue ◇ on any edge to bend it into an arc (or type its radius here; blank = straight). Double-click a ◇ to add an anchor. Straight edges take a typed length.</div><table><tr><th></th><th>length</th>${o.kind!=='conduit'?'<th>r</th>':''}</tr>${Array.from({length:ne},(_,i)=>`<tr><td class="muted">${i+1}→${(i+1)%o.pts.length+1}</td><td>${spans[i].straight?`<input data-edge="${i}" value="${fmtLen(dist(o.pts[i],o.pts[(i+1)%o.pts.length]))}">`:`<span class="muted">${fmtLen(spans[i].len)} ${spans[i].kind==='arc'?'arc':'curved'}</span>`}</td>${o.kind!=='conduit'?`<td>${spans[i].kind!=='bezier'?`<input data-er="${i}" value="${spans[i].bow?fmtLen(spans[i].bow.r):''}" placeholder="straight">`:''}</td>`:''}</tr>`).join('')}</table>`;
+    if(o.kind!=='conduit'){ const all=allSmooth(o), any=isSmooth(o); h+=`<div class="note" style="margin-top:8px"><label style="display:inline"><input type="checkbox" data-allsmooth ${all?'checked':''} ${any&&!all?'data-mixed="1"':''}> Organic shape — make <b>every</b> anchor smooth (beds, ponds). Not for paths: use ◇ on an edge or ◆ on a corner instead.</label></div>`; }
   }
   h+=`<div class="btnrow"><button id="pDup">Duplicate</button><button id="pDel">Delete</button>${o.type==='item'&&o.kind!=='spoint'?'<button id="pRot">Rotate 90°</button>':''}${o.type!=='item'?'<button id="pSimplify" title="Remove points that sit on a straight line between their neighbours">Simplify</button>':''}</div>`;
   el.innerHTML=h;
@@ -240,6 +249,12 @@ function renderProps(){
   el.querySelectorAll('[data-vt]').forEach(b=> b.onclick=()=>{ pushHist(); const k=+b.dataset.vt; setNodeType(o,k, nodeT(o,k)==='s'?'c':'s'); commit(); });
   const setR=(k,v)=>{ if(v>0) o.hnd[k].r=r2(v); else delete o.hnd[k].r; };
   el.querySelectorAll('[data-vr]').forEach(i=> i.onchange=()=>{ const k=+i.dataset.vr; if(i.value.trim()===''){ pushHist(); setR(k,0); commit(); return; } const v=parseLen(i.value); if(isNaN(v)||v<0){ i.value=o.hnd[k].r>0?fmtLen(o.hnd[k].r):''; return; } pushHist(); setR(k,v); commit(); });
+  el.querySelectorAll('[data-er]').forEach(i=> i.onchange=()=>{ const k=+i.dataset.er, N=o.pts.length, A=o.pts[k], B=o.pts[(k+1)%N], c=dist(A,B);
+    if(i.value.trim()===''){ pushHist(); delete o.hnd[k].b; commit(); return; }
+    const r=parseLen(i.value); if(isNaN(r)||r<=0||c<1){ i.value=o.hnd[k].b? fmtLen(arcGeom(o,k).r):''; return; }
+    let sg=Math.sign(o.hnd[k].b||0);
+    if(!sg){ if(o.type==='poly'){ const cen=polyCentroid(o.pts), M=[(A[0]+B[0])/2,(A[1]+B[1])/2], dir=[(B[0]-A[0])/c,(B[1]-A[1])/c], nrm=[-dir[1],dir[0]]; sg = ((M[0]-cen[0])*nrm[0]+(M[1]-cen[1])*nrm[1])>=0? 1 : -1; } else sg=1; }   // default: bow outward
+    pushHist(); o.hnd[k].b=r2(sg*sagForRadius(r,c)); commit(); });
   el.querySelectorAll('[data-rall]').forEach(i=> i.onchange=()=>{ const v=i.value.trim()===''? 0 : parseLen(i.value); if(isNaN(v)||v<0){ i.value=''; return; } pushHist(); o.pts.forEach((_,k)=>{ if(cornerGeom(o,k)) setR(k,v); }); commit(); });
   const ps=$('#pSimplify'); if(ps) ps.onclick=()=>{ pushHist(); const n=simplifyObj(o,3); refresh(); notice(n? 'Removed '+n+' redundant point'+(n>1?'s':'')+' — Ctrl+Z brings them back' : 'Nothing to simplify: no points within 3" of a straight line'); };
   el.querySelectorAll('[data-mprop]').forEach(i=> i.onchange=()=>{ if(i.value.trim()===''){ pushHist(); o.props[i.dataset.mprop]=null; commit(); return; } const v=parseMetric(i.value); if(isNaN(v)){ i.value=o.props[i.dataset.mprop]==null?'':fmtReadingNum(o.props[i.dataset.mprop]); return; } pushHist(); o.props[i.dataset.mprop]=v; commit(); });

@@ -1,6 +1,6 @@
 # Backyard Designer — project handoff for Claude Code
 
-Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.16.2`.
+Single-file, zero-dependency HTML canvas app for planning a backyard: layout, irrigation, electrical conduit, hardscape, plants. Built 2026-09-08. Current build `2026.09.16.3`.
 
 ## Working rules (non-negotiable)
 
@@ -21,12 +21,13 @@ src/p1_head.html    HTML skeleton + all CSS + Help tab text
 src/p2_data.js      constants, BUILD_ID, LAYERS, HEADS (sprinkler DB), PLANTS, LIB (object library), KIND_STYLE, PAVER_SIZES, ZONE_COLORS, DEFAULT_PRICES
 src/p3_engine.js    state, view, helpers (fmtLen/parseLen/geometry), history+autosave, object factories, hit-testing, all canvas rendering, conduitFittings()
 src/p4_ui.js        left panel builder, mouse/keyboard handlers, right-panel tabs (Properties/Layers/Zones/BOM), computeBom(), import/export/PNG, init
-test/smoke.js       Playwright end-to-end suite, 122 assertions (scene build, hit-test precedence,
+test/smoke.js       Playwright end-to-end suite, 136 assertions (scene build, hit-test precedence,
                     undo hygiene, vertex drag, conduit fittings, parseLen, zone clamp, PSI warning,
                     BOM escaping, survey labels/deltas/slope/CSV/migrate, typed lengths / ortho /
                     closing gap / edge edit / units toggle, undo-while-drawing, smooth curves,
                     circle/rectangle modes, walking-path BOM, anchors/handles/mirror/reset/insert-on-curve,
                     corner radius (fillet) geometry/clamp/drag/bulk, simplify on the owner's real path,
+                    arc edges (segment area, typed radius, drag, insert-on-arc, organic tick cannot flatten),
                     JSON round-trip, PNG export).
                     Exits non-zero on failure.
 test/syntax.js      Browserless build-integrity + parse check. Exits non-zero on failure.
@@ -79,6 +80,11 @@ Only one `yard` poly is allowed (drawing a new one replaces it; it is `unshift`e
 - UI: every eligible corner shows a ◆ — on the arc midpoint when rounded, 11 px inside the corner along the bisector when sharp (`handleHit` type `rad`). Dragging it along the bisector sets `r = d / (1/sin(θ/2) − 1)`, passed through `snap()` (6" when Snap is on), clamped to `rMax`, dropped below 3". Vertices table has an `r` column (`[data-vr]`); Properties has **Corner radius** (`[data-rall]`) applying to every eligible corner; canvas labels `r 3'` on each arc when selected. Dimension labels and the Edges table stay **corner-to-corner** (what you stake out); `objLen/objArea/objPerim` use the true rounded geometry.
 - **Simplify** (`simplifyObj(o, tol=3")`, button in Properties): repeatedly removes the interior corner (r = 0) closest to the line through its neighbours while that distance is under tol. The owner's real 17-point rock path goes to 8 with length within 1%.
 - Walking paths now create with corner anchors (`props.smooth` removed from their LIB entries).
+
+**Arc edges (2026.09.16.3) — the primary way to shape a path.** `hnd[k].b` is the signed **sagitta** (bow, inches) of edge k→k+1. `arcGeom(o,k)` turns it into a circular arc through both anchors: `r = (c²/4 + s²)/(2|s|)`, centre `r` from the apex on the far side of the chord, sweep found by passing through the apex (so |s| > r gives a major arc). Sign: positive bows toward the left normal `[-dy, dx]` of the edge direction. An arc edge **wins** over the anchor types at its ends (`spanKind`: arc > straight > bezier), and `setNodeType/setAllNodes` preserve `b`, so the Organic tick can never flatten or bend a path. A corner between arc edges cannot take a fillet (`cornerGeom` returns null). Arcs and fillet arcs sample one point per 7.5° of sweep (`arcSamples`, min `CURVE_SEG`) — a semicircle gets 24 points and the circular-segment area is within ~0.5%.
+- UI: the ◇ at every edge middle (`spanMid`, the apex for arcs) is now a **bend handle**: mousedown starts a `bow` drag (pending, like other handles); the sagitta is the cursor's offset from the chord along the normal, radius snapped with `snap()` for minor arcs, |s| < 1" → straight. **Double-click** the ◇ inserts an anchor (on an arc both halves get `s' = r(1−cos(Δ/4))` so they stay on the same circle). Inserting by single click is gone. The Edges table has an `r` column (`[data-er]`): typed radius → `sagForRadius(r,c)` (r < c/2 becomes a semicircle), default side = away from the polygon centroid (paths: left). Canvas labels stay corner-to-corner with an `r` label outside each bow. Simplify never removes an arc's endpoints.
+- Library: **River rock path (outline)** (kind rock, depth 3) and **Paver path (outline)** (kind paver) under Draw areas — the intended way to draw a path: its own outline, like the house. `makePoly` now applies kind defaults *before* `lib.props` so an entry can override them.
+- The global Smooth tick moved to the bottom of the anchors section, relabelled *Organic shape — every anchor smooth (not for paths)*; `[data-allsmooth]` selector unchanged.
 
 **Shape switch** (`ui.areaShape`: poly | rect | circle, buttons in Draw areas): rect = two clicks or one click + typed `W x H` (`rectPts`); circle = centre click + radius click or typed radius (`circlePts`, 8 points, `{smooth:true}`). `CIRCLE_K` (computed once from the curve) pushes the 8 control points ~0.5% outside the nominal radius so the *drawn* curve has the true radius — area within 0.01% of πr². Both finish through `commitShape → finishDraw(null, extra)`.
 
@@ -150,6 +156,7 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - `ft-in` / `ft.dec` top-bar button toggles every displayed length between `30'-2"` and `30.17 ft`.
 - Place item: click repeatedly; Esc stops. Ghost preview follows cursor.
 - Select: drag = move; drag vertex = reshape; click midpoint "+" = insert vertex (on the curve for curved spans); Alt-click vertex = delete; drag corner square = resize (circles stay round); heads have radius handle (white) and arc handles (orange).
+- Bending an edge: drag the blue ◇ at its middle sideways — that edge alone becomes an arc (radius shown, snaps to 6"); type `r` for the edge in the Edges table; double-click the ◇ to add an anchor.
 - Rounding a corner: drag the orange ◆ inside the corner inward (radius snaps to 6"), or type `r` in the Vertices table, or set **Corner radius** for the whole shape. **Simplify** removes points on straight lines.
 - Anchors: double-click a vertex → corner ↔ smooth (also ○/□ in the Vertices table); drag an orange tangent handle to shape the curve (mirrored; Alt = cusp; Shift = 15° steps); double-click a handle → automatic. Smooth checkbox = all anchors at once.
 - Keys: V select, H pan, M measure, Enter finish, Esc cancel/deselect, Del delete, R rotate 15° (Shift+R 90°), Ctrl+D duplicate, Ctrl+Z/Y, G grid, S snap, D dims, F fit, arrows nudge 6" (Shift 12"). **While drawing, Ctrl+Z / Backspace / Delete remove the last point** and never touch app history. App-level undo/redo call `notice(histDiff(...))` — "Removed X — Ctrl+Y brings it back".
@@ -157,6 +164,9 @@ Returns `{cat,key,item,qty,unit,note}` rows; `state.prices[key]` is the editable
 - Top bar: New, Import (JSON), Export (JSON), PNG (prompts px/ft; renders offscreen at that scale with a title block, restores view), BOM CSV, Undo/Redo, Grid/Snap/Dims/Arcs toggles, Fit, Supply GPM/PSI.
 - Survey: Survey / grade → Survey point, click to place (repeat). Properties: reading (m), Benchmark tick, note. Survey tab for the table, high/low, slope and CSV.
 - Right tabs: Properties (context form), Layers (eye/lock), Zones, BOM, Survey, Help.
+
+## Added in 2026.09.16.3
+- Arc edges: drag any edge's ◇ to bend that edge alone into a circular arc, or type its radius; double-click ◇ to add an anchor. River rock / Paver path **(outline)** entries so a path is drawn like the house outline. The global Smooth tick is demoted to "Organic shape" at the bottom and can no longer alter arcs.
 
 ## Added in 2026.09.16.2
 - Corner radius (fillets) on any square corner: drag the ◆, type r, or set all corners at once. Walking paths draw square. Simplify button. This is the intended way to shape paths; smooth anchors remain for organic beds and circles.

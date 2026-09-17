@@ -356,6 +356,39 @@ const eq = (got, want, m) => JSON.stringify(got) === JSON.stringify(want)
   assert(Math.abs(sim.L1 / sim.L0 - 1) < 0.01, 'without changing its length (' + sim.L0.toFixed(1) + ' → ' + sim.L1.toFixed(1) + ' in)');
   await page.evaluate(() => { ui.selId = null; refresh(); });
 
+  console.log('\n--- arc edges: bend one edge, typed radius, drag, insert on arc, organic tick cannot flatten ---');
+  // 20x10 ft rectangle; bow the top edge (0->1) outward by 5 ft: chord 240, sagitta 60 -> r 150, segment area r²/2·(θ−sinθ)
+  const seg = (() => { const r = 150, th = 2 * Math.asin(120 / r); return r * r / 2 * (th - Math.sin(th)); })();
+  const ar = await page.evaluate(() => { const o = makePoly(libById('rockpath'), rectPts([0, 0], [240, 120])); const base = objArea(o); o.hnd[0].b = -60; const out = objArea(o); const g = arcGeom(o, 0); o.hnd[0].b = 60; const inn = objArea(o); return { base, out, inn, r: g.r, len: g.len, kinds: [0, 1, 2, 3].map(k => spanKind(o, k)), depth: o.props.depth }; });
+  assert(Math.abs(ar.out - (28800 + seg)) / seg < 0.01, 'bowing the top edge 5 ft outward adds the circular segment (' + ar.out.toFixed(0) + ' vs ' + (28800 + seg).toFixed(0) + ' sq in)');
+  assert(Math.abs(ar.inn - (28800 - seg)) / seg < 0.01, 'bowing it inward removes the same segment (' + ar.inn.toFixed(0) + ')');
+  eq([+ar.r.toFixed(2), ar.kinds, ar.depth], [150, ['arc', 'straight', 'straight', 'straight'], 3], 'r = (c²/4 + s²)/2s = 150; only that edge is an arc; River rock path (outline) defaults to 3" deep');
+  assert(Math.abs(ar.len - 150 * 2 * Math.asin(120 / 150)) < 0.01, 'arc length = r·θ');
+  await page.click('#areaShape button[data-shape="rect"]');
+  await click('rockpath'); await cw(30 * 12, 16 * 12); await page.keyboard.type('20x10'); await page.keyboard.press('Enter');
+  await page.click('#areaShape button[data-shape="poly"]'); await page.keyboard.press('Escape');
+  await page.evaluate(() => { const o = state.objects.find(x => x.kind === 'rock' && x.pts[0][0] === 360 && x.pts[0][1] === 192); ui.selId = o.id; refresh(); const i = document.querySelector('[data-er="0"]'); i.value = "12'6\""; i.dispatchEvent(new Event('change')); });
+  const er = await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); const g = arcGeom(o, 0); return { b: o.hnd[0].b, r: +g.r.toFixed(2), others: [1, 2, 3].map(k => o.hnd[k].b || 0), outward: o.hnd[0].b < 0, bomTons: computeBom().find(x => /River rock path \(outline\)/.test(x.item)).qty }; });
+  eq([er.b, er.r, er.others, er.outward], [-60, 150, [0, 0, 0], true], 'typing r = 12\'6" on the top edge bows it 5 ft outward (poly default: away from the centroid); other edges untouched');
+  assert(er.bomTons > 0, 'the outlined rock path lands in the BOM by the ton (' + er.bomTons + ')');
+  const mid = await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); return spanMid(o, 1); });    // right edge (1->2), straight, apex = chord middle
+  const m0 = await pt(mid[0], mid[1]), m1 = await pt(mid[0] + 30, mid[1]);
+  await page.mouse.move(m0[0], m0[1]); await page.mouse.down(); await page.mouse.move(m1[0], m1[1], { steps: 4 }); await page.mouse.up();
+  const dr = await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); const g = arcGeom(o, 1); return { b: o.hnd[1].b, r: g && g.r, n: o.pts.length, top: o.hnd[0].b }; });
+  assert(dr.b && Math.abs(Math.abs(dr.b) - 30) < 3 && dr.n === 4, 'dragging the right edge\'s ◇ 30" outward bows just that edge (b = ' + dr.b + '), no anchor was inserted');
+  assert(Math.abs(dr.r % 6) < 0.05 || Math.abs(dr.r % 6 - 6) < 0.05, 'its radius snapped to 6" (r = ' + dr.r.toFixed(2) + ')');
+  eq(dr.top, -60, 'the top edge kept its own bow');
+  const apex = await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); return arcGeom(o, 0).apex; });
+  const ax = await pt(apex[0], apex[1]); await page.mouse.dblclick(ax[0], ax[1]);
+  const ins2 = await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); const g0 = arcGeom(o, 0), g1 = arcGeom(o, 1); return { n: o.pts.length, r0: +g0.r.toFixed(1), r1: +g1.r.toFixed(1), c0: g0.C.map(v => +v.toFixed(1)), c1: g1.C.map(v => +v.toFixed(1)), onArc: dist(o.pts[1], g0.C) }; });
+  eq([ins2.n, ins2.r0, ins2.r1], [5, 150, 150], 'double-clicking an arc\'s ◇ inserts an anchor and both halves keep r = 150');
+  eq(ins2.c0, ins2.c1, 'both halves share the same centre');
+  assert(Math.abs(ins2.onArc - 150) < 0.05, 'the new anchor sits on the arc');
+  const org = await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); const before = objArea(o); const cb = document.querySelector('[data-allsmooth]'); cb.checked = true; cb.dispatchEvent(new Event('change')); return { kind0: spanKind(o, 0), b0: o.hnd[0].b, area: objArea(o), before, all: allSmooth(o) }; });
+  eq([org.kind0, org.b0, org.all], ['arc', ins2.r0 ? org.b0 : null, true], 'the Organic tick makes anchors smooth but an arc edge stays an arc — it cannot flatten or bend your path');
+  assert(org.b0 !== undefined && org.b0 !== null, 'bow survived the anchor flip');
+  await page.evaluate(() => { const o = state.objects.find(x => x.id === ui.selId); setAllNodes(o, 'c'); ui.selId = null; refresh(); });
+
   console.log('\n--- JSON round-trip ---');
   const n1 = await page.evaluate(() => state.objects.length);
   const json = await page.evaluate(() => JSON.stringify(state));

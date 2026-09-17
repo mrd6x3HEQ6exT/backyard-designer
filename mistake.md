@@ -2,8 +2,15 @@ MISTAKE LOG — self-check file, not for human reading. Newest first.
 Standing rule: before any build/code change, grep this file (tags below) as a
 visible tool call. Grep again before shipping. No visible tool call = not done.
 
-TAGS (newest first): wrong-default-for-the-job > numeric-claim-without-a-test > focus-scrolls-overflow-hidden > mouse-direction-is-never-exact > trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
+TAGS (newest first): drag-means-bend-not-insert > wrong-default-for-the-job > numeric-claim-without-a-test > focus-scrolls-overflow-hidden > mouse-direction-is-never-exact > trailing-comment-swallows-line > weak-negative-test > tests-that-cannot-fail > escape-at-the-sink > playwright-canvas-coords > path-doubleclick-finish > html-attr-quotes
 
+---
+TAG: drag-means-bend-not-insert
+IF: putting a handle on the middle of an edge, or offering any "global" curve switch on a shape
+WHAT: the + at each edge middle inserted a vertex on click and then dragged it; the owner grabbed it expecting the edge to bend (every CAD polyline works that way) and got a new point on the curve instead — "the + system works terrible". Meanwhile the one prominent curve control was a shape-wide Smooth tick, so "adjust the radius by section" had no gesture at all. Three builds (smooth, tangent handles, fillets) each added a curve model without giving him the one he was reaching for.
+WHY: built from the geometry outward (what can a Bezier do) instead of from the gesture inward (what does grabbing the middle of an edge mean to someone laying out a path). Never asked what "adjust the curve" meant physically: bow this section, by this much.
+RESULT: an angry user across four builds; two of the curve models are now secondary
+FIX: an edge's middle handle bends that edge; inserting is the secondary gesture (double-click). Per-section control is the default; global switches go to the bottom with a warning label. When a user says "adjust X by section", the primitive must be per-section before anything else ships.
 ---
 TAG: wrong-default-for-the-job
 IF: choosing a default behaviour for a drawing tool, or picking which curve model to offer

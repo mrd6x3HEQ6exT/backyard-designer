@@ -1,6 +1,6 @@
 <script>
 'use strict';
-const BUILD_ID = '2026.09.16.2';
+const BUILD_ID = '2026.09.16.3';
 const GRID = 6;           // inches
 const FT = 12;
 
@@ -72,6 +72,9 @@ const LIB = {
     {id:'rock',    name:'Decorative rock',         tool:'poly', kind:'rock',    layer:'hardscape', color:'#b0a090'},
     {id:'mulch',   name:'Mulch / planting bed',    tool:'poly', kind:'mulch',   layer:'plants',    color:'#8d6e63'},
     {id:'planter', name:'Garden wall / planter',   tool:'poly', kind:'planter', layer:'hardscape', color:'#5d4037'},
+    // Path outlines: draw the path's own edge like the house outline, then bend any edge into an arc.
+    {id:'rockpath', name:'River rock path (outline)', tool:'poly', kind:'rock',  layer:'hardscape', color:'#b0a090', props:{depth:3}},
+    {id:'paverpath',name:'Paver path (outline)',      tool:'poly', kind:'paver', layer:'hardscape', color:'#c9a27a'},
     {id:'area',    name:'Generic area',            tool:'poly', kind:'area',    layer:'notes',     color:'#90a4ae'},
   ],
   runs: [
